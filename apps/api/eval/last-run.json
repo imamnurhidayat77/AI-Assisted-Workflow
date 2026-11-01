@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-01T17:38:21.361Z",
+  "mode": "mock",
+  "passed": 6,
+  "total": 6,
+  "checks": [
+    {
+      "name": "T1 anti-halusinasi (0 ID asing dari 6 pertanyaan)",
+      "pass": true,
+      "detail": "asing: 0"
+    },
+    {
+      "name": "T2 documents API mengembalikan daftar",
+      "pass": true,
+      "detail": "7 docs"
+    },
+    {
+      "name": "T3 ingest fixture menghasilkan chunk",
+      "pass": true,
+      "detail": "1 chunks"
+    },
+    {
+      "name": "T4 retrieval top-1 = dokumen fixture",
+      "pass": true,
+      "detail": "Eval_Fixture_Cycleway.csv d=0.55"
+    },
+    {
+      "name": "T5 jawaban chat mensitasi fixture + menyebut 777",
+      "pass": true,
+      "detail": "via=mock"
+    },
+    {
+      "name": "T6 cleanup fixture bersih",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

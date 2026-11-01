@@ -1,0 +1,4 @@
+# Graph hanya untuk kode produksi — figma-make/ hanya referensi (lihat AGENTS.md).
+figma-make/
+*.zip
+apps/api/uploads/

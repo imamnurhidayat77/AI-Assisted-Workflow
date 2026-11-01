@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.next/
+.env
+!.env.example
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
+*.log
+.DS_Store

@@ -1,0 +1,156 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenderStatus {
+  IDENTIFIED
+  PENDING
+  SUBMITTED
+  WON
+  LOST
+}
+
+model Tender {
+  id        String       @id // e.g. TND-2026-001
+  name      String
+  agency    String
+  country   String
+  closesOn  DateTime?
+  closeLabel String // display asli "24 Nov 2026" agar migrasi mock mulus
+  value     String // "NZD 1,250,000" — simpan display; amount+currency menyusul
+  product   String
+  status    TenderStatus @default(IDENTIFIED)
+  priority  String? // High | Medium | Low
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  title     String
+  preview   String?
+  createdAt DateTime @default(now())
+  messages  Message[]
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // user | assistant | system
+  content        String       @db.Text
+  createdAt      DateTime     @default(now())
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  fileName  String
+  sizeLabel String?
+  status    String   @default("Processing") // Processing | Processed | Completed
+  extractedText String? @db.Text // teks asli hasil parse (RAG)
+  createdAt DateTime @default(now())
+  chunks    DocumentChunk[]
+}
+
+// Potongan teks dokumen + vektor embedding (384 dim, all-MiniLM-L6-v2 lokal).
+// Kolom embedding bertipe pgvector dan dikelola via SQL mentah (lihat migrasi).
+model DocumentChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex Int
+  content    String   @db.Text
+  embedding  Unsupported("vector(384)")?
+
+  @@index([documentId])
+}
+
+model Job {
+  id       String @id @default(cuid())
+  name     String
+  agent    String
+  state    String // Running | Completed | Active | Scheduled
+  trigger  String?
+  lastRun  String?
+  progress String?
+}
+
+// Keputusan manusia atas draft AI — audit permanen (AI drafter, human decider).
+model Draft {
+  id               String    @id @default(cuid())
+  kind             String    @default("general")
+  title            String
+  body             String    @db.Text
+  status           String    @default("draft") // draft | in_review | approved | rejected
+  assistantId      String?
+  skillsUsed       Json      @default("[]")
+  sources          Json      @default("[]")
+  tenderIds        Json      @default("[]")
+  sourceDocumentId String?
+  sourceDocumentName String?
+  decidedBy        String?
+  decidedAt        DateTime?
+  history          Json      @default("[]")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+enum InvoiceDirection {
+  AR
+  AP
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  OVERDUE
+}
+
+// Aggregate-safe finance: no bank details, amounts only.
+model Invoice {
+  id           String           @id // INV-AR-2101 / INV-AP-3310
+  direction    InvoiceDirection
+  partner      String
+  amountCents  Int
+  currency     String           @default("NZD")
+  status       InvoiceStatus    @default(UNPAID)
+  dueLabel     String
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+model CloseCheckItem {
+  id        String   @id // CC-2026-11-01
+  period    String // 2026-11
+  item      String
+  done      Boolean  @default(false)
+  owner     String // team name, never a person
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// HR: policies + aggregate roster only. No individual names/salaries by design.
+model HrPolicy {
+  id        String   @id // HR-POL-LEAVE
+  topic     String
+  title     String
+  summary   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LeaveRow {
+  id        String   @id // LV-2026-W46-OPS
+  team      String
+  weekLabel String
+  headcount Int
+  onLeave   Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

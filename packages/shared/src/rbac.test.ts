@@ -6,14 +6,20 @@ import {
   canUseAssistant,
   docVisibleToRole,
   financeAnswer,
+  greetingAnswer,
   hrAnswer,
+  isGreeting,
   mockChatAnswer,
   opsAnswer,
   parseDraftBody,
   renderDraftBody,
+  sanitizeActions,
+  serializeDraftBody,
+  SPACE_TEMPLATES,
   SQL_TABLE_COLUMNS,
   sqlTablesFor,
   templateRefsFromSources,
+  isSpaceVisibility,
   type CloseCheckItem,
   type HrPolicy,
   type Invoice,
@@ -164,6 +170,53 @@ describe('draft body template', () => {
       { label: 'Tender Pipeline / TND-2026-001', detail: 'Live database row' },
     ])).toEqual(['RFP-2024.pdf']);
     expect(templateRefsFromSources(undefined)).toEqual([]);
+  });
+
+  it('sapaan dijawab singkat tanpa kartu/tabel/tombol', () => {
+    expect(isGreeting('hi')).toBe(true);
+    expect(isGreeting('  Hello  ')).toBe(true);
+    expect(isGreeting('hi, which tenders should we prioritize?')).toBe(false);
+    expect(isGreeting('')).toBe(false);
+    const g = greetingAnswer('sales-assistant');
+    expect(g.tenderIds).toEqual([]);
+    expect(g.sources).toEqual([]);
+    const m = mockChatAnswer('hei');
+    expect(m.tenderIds).toEqual([]);
+    expect(m.answerTitle).toMatch(/Hi there/);
+  });
+
+  it('sanitizeActions hanya lolos draft/link valid, maks 3', () => {
+    expect(sanitizeActions([
+      { label: 'Prepare tender brief', kind: 'draft', draftKind: 'tender-brief' },
+      { label: 'Open pipeline', kind: 'link', href: '/data' },
+      { label: 'Evil', kind: 'link', href: 'https://evil.com' },
+      { label: 'Bad kind', kind: 'draft', draftKind: 'nuklir' },
+      { label: '  ', kind: 'draft', draftKind: 'general' },
+      'bukan-objek',
+    ])).toEqual([
+      { label: 'Prepare tender brief', kind: 'draft', draftKind: 'tender-brief' },
+      { label: 'Open pipeline', kind: 'link', href: '/data' },
+    ]);
+    expect(sanitizeActions('bukan-array')).toEqual([]);
+  });
+
+  it('serializeDraftBody roundtrip stabil + edit tercermin', () => {
+    const body = 'Intro.\n\n## Facts\n- a\n- b\n\n| H1 | H2 |\n| v1 | v2 |\n\n---\nFooter note';
+    const once = parseDraftBody(body);
+    const twice = parseDraftBody(serializeDraftBody(once));
+    expect(twice).toEqual(once);
+    const edited = once.map((s) => s.heading === 'Facts' ? { ...s, bullets: [...s.bullets, 'c baru'] } : s);
+    expect(serializeDraftBody(edited)).toContain('- c baru');
+  });
+
+  it('template & visibility guard valid', () => {
+    expect(SPACE_TEMPLATES.length).toBeGreaterThan(0);
+    for (const t of SPACE_TEMPLATES) {
+      expect(t.name.length).toBeGreaterThan(0);
+      expect(isSpaceVisibility(t.visibility)).toBe(true);
+      expect(Array.isArray(t.itemKinds)).toBe(true);
+    }
+    expect(isSpaceVisibility('PUBLIC')).toBe(false);
   });
 
   it('parseDraftBody memecah heading/bullet/tabel/footer', () => {

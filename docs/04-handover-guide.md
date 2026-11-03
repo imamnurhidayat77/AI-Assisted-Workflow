@@ -1,4 +1,4 @@
-# Handover Guide — Street Smart Cockpit
+# Handover Guide — Street Smart Copilot
 
 **Untuk:** tim Smart City Street Ltd / maintainer berikutnya.
 **Prasyarat baca:** `01-requirements-brief.md`, `02-system-design.md`.
@@ -37,7 +37,8 @@ Tanpa login, Shell me-redirect ke `/login` dan endpoint tulis mengembalikan 401.
 ## 3. Loop harian
 
 - `npm run dev:web` / `npm run dev:api` — hot reload (tsx watch / Next dev).
-- `npm run eval --workspace=apps/api` — 6 checks (grounding, RAG, cleanup). Harus 6/6.
+- `npm run eval --workspace=apps/api` — 9 checks (grounding, RAG, cleanup). Harus 9/9.
+- `npm run eval:answers --workspace=apps/api` — 9 checks kualitas jawaban (routing assistant per role, skill benar dieksekusi, anti-halusinasi ID, deny-duty, no-leak lintas-role, sapaan singkat). Harus 9/9 → `eval/answer-scores.json`.
 - `npm run build --workspace=apps/web --workspace=apps/api` — gate sebelum demo/commit besar.
 
 ## 4. Environment variables
@@ -48,7 +49,7 @@ Tanpa login, Shell me-redirect ke `/login` dan endpoint tulis mengembalikan 401.
 | `API_PORT` | `.env` | tidak | default `4000` |
 | `WEB_URL` | `.env` | tidak | default `http://localhost:3000` (CORS + Socket.IO) |
 | `NEXT_PUBLIC_API_URL` | `apps/web/.env.local` | ya (prod) | default `http://localhost:4000` |
-| `AI_PROVIDER` | `apps/api/.env` | tidak | `http` = model asli, selain itu = simulasi |
+| `AI_PROVIDER` | `apps/api/.env` | tidak | `http` = model asli, selain itu = built-in rules (tanpa LLM, tetap grounded ke DB) |
 | `LLM_BASE_URL` | `apps/api/.env` | bila `http` | `https://opencode.ai/zen/go/v1` |
 | `LLM_API_KEY` | `apps/api/.env` | bila `http` | key OpenCode Go — **tidak pernah di-commit** |
 | `LLM_MODEL` | `apps/api/.env` | tidak | default `muse-spark-1.3-contributor` |
@@ -79,13 +80,16 @@ Tanpa login, Shell me-redirect ke `/login` dan endpoint tulis mengembalikan 401.
 | `GET /api/notifications` | key | notifikasi live per-role (deadline ≤14 hari, overdue + flag SLA, closing, extracting, digest Senin mgmt) — bell di Shell |
 | `GET /api/finance/overview` | key + role finance/mgmt | invoice + checklist read-only — halaman `/finance` |
 | `GET /api/hr/overview` | key + role hr/mgmt | policies + roster agregat — halaman `/hr` |
-| `GET/POST /api/quotations`, `PATCH /:id` | key + role sales/ops/mgmt | CRUD quotation (nomor Q-TAHUN-XXXX otomatis; edit draft/rejected saja) — halaman `/quotations`; approval via draft `quotation-review` |
+| `GET/POST /api/quotations`, `PATCH /:id` | key + role sales/ops/mgmt | CRUD quotation (nomor Q-TAHUN-XXXX otomatis; edit draft/rejected saja; terkunci saat in_review) — halaman `/quotations`; approval via draft `quotation-review` + auto-sync status; `sent` lewat validUntil → `expired` via scheduler |
+| `POST /api/tenders`, `POST /api/distributor/import` | key + role sales/ops/mgmt | input tender real (form Database explorer) + import CSV distributor (upsert natural key, idempoten) |
 | `/deadlines` (web saja) | role sales/ops/mgmt | timeline closing dari closeLabel (overdue/≤14d/≤30d/later) — tanpa endpoint baru |
 | `/executive` (web saja) | role management | KPI + snapshot lintas-domain dari endpoint di atas — tanpa endpoint baru |
 | Scheduler (hourly) | — | `in_review` > `DRAFT_SLA_DAYS` (default 3) → history `escalated` sekali; `updatedAt` dipertahankan agar overdue tetap terhitung |
 | `GET /api/jobs` | key | antrean riil + draft approvals (halaman: operations/management) |
 | `GET /api/reports/summary` | key | KPI + chart data (mock agregat) |
-| `GET/POST /api/spaces`, `GET/DELETE /api/spaces/:id`, `POST/DELETE items` | tulis: key | workspace persisten |
+| `GET/POST /api/spaces`, `GET/DELETE /api/spaces/:id`, `POST/DELETE items`, `POST /:id/archive` | tulis: key | workspace kontekstual (ownership + visibility PRIVATE/ROLE + aktivitas; legacy tanpa owner = terlihat semua) |
+| `GET /api/spaces/:id/actions` | key (difilter checker) | saran aksi turunan data: review draft, follow-up >7 hari, tender closing ≤14 hari |
+| `POST /api/chat` `{ spaceId? }` | key + role | chat dengan konteks space (403 bila tak boleh lihat); sitasi "Space context"; log CONTEXT_USED + `ChatAudit.spaceId` |
 | `GET /api/audit?take=` | key + role `management` | riwayat chat (preview 200 char) |
 
 ## 7. Troubleshooting
@@ -102,17 +106,23 @@ Tanpa login, Shell me-redirect ke `/login` dan endpoint tulis mengembalikan 401.
 | `prisma migrate dev` menolak (non-interaktif) | Pakai `npm run prisma:migrate` (= `deploy`). Buat migrasi baru via `prisma migrate diff` → simpan ke `prisma/migrations/`. |
 | onnxruntime binding missing (Intel Mac) | Sudah ditangani: embedding memakai hashing deterministik, bukan ORT. Tidak perlu diperbaiki kecuali ganti model neural (lihat docs/02 §3.3). |
 
-## 8. Yang BELUM production-ready (jangan deploy apa adanya)
+## 8. Kesiapan produksi
+
+Sudah dikeraskan: header keamanan minimal, `x-powered-by` mati, boot `NODE_ENV=production`
+**menolak jalan** bila `ALLOW_DEMO_LOGIN≠false` / `DUMMY_PASSWORD` kosong / `DATABASE_URL` masih lokal.
+Rate limit per-user aktif; audit chat + decision history permanen.
+
+Tersisa sebelum production sungguhan:
 
 1. `POST /api/auth/login` memakai satu password dummy untuk semua akun (`DUMMY_PASSWORD`, default `sss12345`) — ganti SSO/OAuth + passwordHash per user, set `ALLOW_DEMO_LOGIN=false`.
-2. Tanpa rate limiting, tanpa audit log akses file, `cors` terbuka ke `WEB_URL` saja (pastikan benar di prod).
+2. `cors` terbuka ke `WEB_URL` saja (pastikan benar di prod); audit log akses file belum ada.
 3. Embedding hashing = batas bawah retrieval; upgrade ke model neural untuk akurasi (interface siap).
-4. Backup DB/uploads belum otomatis; belum ada monitoring/alerting.
+4. Backup DB/uploads belum otomatis (`npm run db:backup` manual); belum ada monitoring/alerting.
 5. Evaluasi formal (20 dokumen + usability + time-saved, lihat `docs/03`) menunggu data & sesi perusahaan.
 
 ## 9. Definisi "selesai" (checklist serah terima)
 
-- [ ] `npm run eval` 6/6 (mock; live bila ada kuota) + `eval/last-run.json` tersimpan.
+- [ ] `npm run eval` 9/9 + `npm run eval:answers` 9/9 (mock; live bila ada kuota) + `eval/last-run.json` & `eval/answer-scores.json` tersimpan.
 - [ ] Build web + API hijau; smoke test §10 lolos.
 - [ ] `.env` terisi (tanpa secret ter-commit — cek `git status` bersih dari `.env`).
 - [ ] Backup DB + uploads bila ada dokumen asli perusahaan.

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSpaceContext, type ContextLoaders } from './spaceContext.js';
+import { buildSpaceContext, requireSpaceContext, scoreSpaces, type ContextLoaders } from './spaceContext.js';
 
 function loaders(over: Partial<ContextLoaders> = {}): ContextLoaders {
   return {
@@ -58,6 +58,31 @@ describe('buildSpaceContext filtering', () => {
       })),
       /not found/,
     );
+  });
+
+  it('requireSpaceContext: tak boleh lihat → 403 jelas; DB mati → 503 terus', async () => {
+    const denied = loaders({
+      loadSpace: async () => ({ id: 'sp-9', name: 'x', description: '', ownerId: 'u-ops', ownerRole: 'operations', visibility: 'PRIVATE' as const, status: 'ACTIVE' as const }),
+    });
+    await assert.rejects(requireSpaceContext('sp-9', sales, denied), (e: unknown) => {
+      const err = e as { status?: number; message?: string };
+      return err.status === 403 && /not available/.test(err.message ?? '');
+    });
+    const down = loaders({
+      loadSpace: async () => { throw Object.assign(new Error('database unreachable'), { status: 503 }); },
+    });
+    await assert.rejects(requireSpaceContext('sp-9', sales, down), (e: unknown) => (e as { status?: number }).status === 503);
+  });
+
+  it('scoreSpaces mencocokkan domain pesan ↔ space (bukan tebakan model)', () => {
+    const spaces = [
+      { id: 'a', name: 'Tender Opportunity Review', description: 'prioritize tenders' },
+      { id: 'b', name: 'Random Notes', description: 'misc' },
+    ];
+    const hit = scoreSpaces(spaces, 'Which tenders should we prioritize? TND-2026-001');
+    assert.ok(hit && hit.spaceId === 'a');
+    const miss = scoreSpaces(spaces, 'Halo, apa kabar?');
+    assert.equal(miss, null);
   });
 
   it('output dibatasi budget (truncate + flag)', async () => {

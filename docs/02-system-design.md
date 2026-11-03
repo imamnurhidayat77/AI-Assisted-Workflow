@@ -1,4 +1,4 @@
-# System Design — Street Smart Cockpit
+# System Design — Street Smart Copilot
 
 **Companion to:** `01-requirements-brief.md`
 **Status:** Living document — v1.1 (drafts lifecycle, Spaces decisions, LLM extraction opt-in)
@@ -32,7 +32,7 @@ flowchart LR
 ### 1.1 Repository layout
 
 ```
-apps/web        Next.js 15 (App Router, TS, Tailwind v4) — Cockpit UI
+apps/web        Next.js 15 (App Router, TS, Tailwind v4) — Copilot UI
 apps/api        Express TS — REST API (tsx watch / tsc build)
 apps/api/prisma schema.prisma + seed.ts
 apps/api/uploads stored user files (gitignored)
@@ -189,7 +189,13 @@ erDiagram
 - Finance: `Invoice` (AR/AP, agregat — tanpa bank detail) + `CloseCheckItem` (per periode, owner = tim).
 - HR: `HrPolicy` + `LeaveRow` (agregat tim — tanpa nama/gaji individu, by design).
 - Seed: 6 tenders, 5 jobs, 3 documents, 5 invoices, 5 checklist items, 3 policies, 3 roster rows (idempoten via `upsert`/cek `fileName`) + demo users (`AppUser`).
-- Spaces surfaces approved drafts (`GET /api/drafts?status=approved`) as saved workspace decisions with source-document + decider links.
+- Spaces = contextual workspaces (bukan arsip): ownership (`ownerId/ownerRole`), visibility (`PRIVATE|ROLE`, legacy tanpa owner = terlihat semua), status (`ACTIVE|ARCHIVED`).
+  - Akses server-side (`spaceAccess.ts`): view = owner / role sama / management / legacy; edit = owner / management / legacy. Chat dengan `spaceId` yang tak boleh dilihat → 403 eksplisit, bukan diam-diam.
+  - Konteks grounding (`spaceContext.ts`, bounded ±3000 char): item conversation (milik sendiri) / dokumen (sesuai domain role) / tender (sales|ops|mgmt) / note + draft tertaut + 10 aktivitas terakhir; tabel/kolom di luar scope tidak pernah masuk prompt.
+  - Aksi turunan data (`GET /api/spaces/:id/actions`): review draft (maker-checker aware), follow-up conversation >7 hari, tender closing ≤14 hari. Tanpa aksi karangan.
+  - Draft ↔ space: `Draft.spaceId` (SetNull); create/approve/reject mencatat `SpaceActivity` (ITEM_ADDED/REMOVED, DRAFT_CREATED/APPROVED/REJECTED, CONTEXT_USED). `ChatAudit.spaceId` mencatat konteks pemakaian.
+  - Saran simpan deterministik (`suggestedSpace`, keyword domain vs nama/deskripsi space, bukan tebakan model) dengan dismiss per pesan.
+  - Template pembuatan (`SPACE_TEMPLATES` di shared): tender review, monthly close, distributor performance.
 - Assistant registry (`packages/shared`): assistants × skills; semua grounding service DB-only (tanpa fallback mock — kosong = jawaban "belum ada data" yang eksplisit).
 - Migrations: `prisma migrate dev` (atau `deploy`); client generated via `prisma:generate`. DB = Neon `production` (lihat AGENTS.md).
 

@@ -1,4 +1,4 @@
-# Street Smart Cockpit — AI Leverage untuk Smart City Street Ltd NZ
+# Street Smart Copilot — AI Leverage untuk Smart City Street Ltd NZ
 
 Konsep: SAP Joule-style AI copilot untuk operasi bisnis — tender pemerintah,
 distributor sales, katalog produk, quotation, dokumen, dan jobs/otomasi.
@@ -7,7 +7,7 @@ Design awal dari Figma Make ada di `figma-make/` (referensi, jangan diedit).
 Implementasi production ada di monorepo ini:
 
 ```
-apps/web        Next.js 15 (App Router, TS, Tailwind v4) — UI Cockpit (tanpa data palsu: API mati = error/empty eksplisit)
+apps/web        Next.js 15 (App Router, TS, Tailwind v4) — UI Copilot (tanpa data palsu: API mati = error/empty eksplisit)
 apps/api        Express TS — REST API, Prisma/Postgres Neon saja (tanpa fallback mock; DB mati = 503)
 packages/shared Types + fixture data (seed/test saja, BUKAN fallback runtime)
 prisma/         (schema canonical — dipakai apps/api, lihat apps/api/prisma)
@@ -38,9 +38,10 @@ Login demo: buka `/login`, pilih akun dummy per role (password `sss12345`).
 | `/` | discover | Hero + composer + prompt chips | semua |
 | `/conversation` | conversation | Jawaban AI + tender cards + sources | semua (assistant per-role) |
 | `/conversations` | conversations | Riwayat chat | semua (milik sendiri) |
-| `/spaces` | spaces | Workspace persistent | semua |
+| `/spaces` | spaces | Workspace kontekstual: konteks grounding, next actions, pending drafts, activity timeline | semua (isi difilter role + ownership; private = pemilik, role = se-role, mgmt = semua) |
 | `/inbox` | — | My inbox: awaiting my decision + my drafts needing action | semua (difilter checker/owner) |
 | `/executive` | — | Executive overview: KPI + snapshot lintas-domain read-only | management |
+| `/metrics` | — | Adoption metrics: usage by role/assistant, draft funnel | management |
 | `/quotations` | — | Quotations: CRUD draft + request approval (maker-checker) | sales, operations, management |
 | `/deadlines` | — | Tender closing timeline (overdue/14d/30d/later) | sales, operations, management |
 | `/jobs` | jobs | Jobs & automations | operations, management |
@@ -58,7 +59,7 @@ State navigasi + toast + composer disentralisasi di `apps/web/src/lib/store.tsx`
 - `GET /health`
 - Semua endpoint `/api/*` (kecuali `/health`, `/api/auth/users`, demo-login) wajib `X-API-Key`
 - `GET /api/tenders`, `/api/jobs`, `/api/conversations` — baca operasional (semua role aktif); `/api/reports/summary` dan `/api/alerts` dihapus (angka palsu) — reports dihitung live dari `/api/tenders`
-- `POST /api/chat` — `{ message, assistantId? }` → routing assistant per-role + RBAC + audit; infer bila absen
+- `POST /api/chat` — `{ message, assistantId? }` → routing assistant per-role + RBAC + audit; default = assistant role user. Planning loop 2 langkah: `selectSkills` (intent → maks 3 skill) lalu `executeSkills` (hitung deterministik dari snapshot live + relasi entitas tender↔quotation↔draft) — model hanya merangkai jawaban dari hasil skill, `skillsUsed` = yang benar-benar jalan. Jawaban membawa `actions` kontekstual (disanitasi server, maks 3; sapaan & jawaban kosong = tanpa tombol)
 - `GET /api/chat/assistants` — assistant yang boleh dipakai role user
 - `POST /api/chat/query` — Text-to-SQL read-only (`{ question }` atau `{ sql }`), allowlist tabel/kolom per-role, maks 50 baris
 - `GET /api/documents` — terfilter domain per-role (`general` | `finance` | `hr`); upload bawa `domain`
@@ -66,7 +67,8 @@ State navigasi + toast + composer disentralisasi di `apps/web/src/lib/store.tsx`
 - `GET /api/notifications` — notifikasi live per-role (draft menunggu + flag overdue SLA, deadline ≤14 hari, overdue, closing terbuka, extracting, digest Senin management) — bell di Shell
 - `GET /api/finance/overview` — invoice + checklist (finance/management saja)
 - `GET /api/hr/overview` — policies + roster agregat (hr/management saja; tanpa nama/gaji individu by design)
-- Quotations: `GET/POST /api/quotations`, `PATCH /:id` (sales/ops/mgmt; sales hanya milik sendiri; edit hanya draft/rejected; approved/rejected final hanya lewat draft `quotation-review`); tabel `Quotation` terbuka di Text-to-SQL untuk sales/ops/mgmt
+- Quotations: `GET/POST /api/quotations`, `PATCH /:id` (sales/ops/mgmt; sales hanya milik sendiri; edit hanya draft/rejected; terkunci saat in_review; approved/rejected final hanya lewat draft `quotation-review` dengan auto-sync status); tabel `Quotation` terbuka di Text-to-SQL untuk sales/ops/mgmt
+- Input data real dari UI: `POST /api/tenders` (form di Database explorer) + `POST /api/distributor/import` (upload CSV di tab Distributor reports; upsert natural key, idempoten)
 - Scheduler dalam proses: sweep eskalasi tiap jam (`in_review` > `DRAFT_SLA_DAYS`=3 hari → history `escalated` sekali; `updatedAt` asli dipertahankan)
 - `GET /api/audit` — riwayat chat (preview), khusus management (+ halaman `/audits`)
 - `GET /api/conversations` + `GET /api/conversations/:id` — thread chat milik sendiri (persist per user)

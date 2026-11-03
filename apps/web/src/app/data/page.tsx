@@ -23,7 +23,16 @@ export default function DataPage() {
   // memakai Text-to-SQL di atas (tabel role-nya, enforcement di server).
   const canBrowseTenders = !user || user.role === 'sales' || user.role === 'operations' || user.role === 'management';
   const roleTables = sqlTablesFor(user?.role);
-  const [search, setSearch] = useState('');
+  // Dukung deep link ?q= (mis. dari Space): pre-filter daftar tender.
+  const initialQ = (() => {
+    try {
+      const q = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('q');
+      return q ?? '';
+    } catch {
+      return '';
+    }
+  })();
+  const [search, setSearch] = useState(initialQ);
   const [rows, setRows] = useState<Tender[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<Tender | null>(null);

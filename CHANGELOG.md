@@ -29,3 +29,18 @@ Sesudahnya Spaces adalah workspace yang memberi konteks ke copilot:
 - **Template pembuatan** (`SPACE_TEMPLATES`): tender review, monthly close, distributor.
 
 Semua role lama tetap berlaku; DB lama aman (kolom baru nullable/default, migrasi aditif).
+
+## Audit hardening Spaces (temuan diperbaiki, tanpa mengubah perilaku yang sudah benar)
+
+- Banner saran simpan kini benar-benar dirender (non-blocking, di atas daftar follow-up),
+  dengan dismiss persisten per space+pesan via localStorage dan aksi simpan sekali klik.
+- Tautan draft↔conversation dibuat eksplisit (`Draft.sourceConversationId` +
+  `SpaceItem.sourceId`, migrasi aditif): FOLLOW_UP memakai `hasLinkedDraft`
+  (unit-tested) — tidak ada lagi pencocokan judul.
+- `POST /api/spaces/:id/items` memvalidasi referensi per kind (tender harus ada,
+  dokumen harus dalam scope role, conversation harus milik user) dan mengisi
+  title/preview dari server, bukan klaim client.
+- `suggestSpace` memakai `canEditSpace` yang sama dengan route lain (konsisten).
+- Space arsip: hanya REVIEW_DRAFT yang ditawarkan (tanpa follow-up/tender baru).
+- `KIND_LINK` memakai `sourceId` bila ada (`/conversation?c=`, fallback `?q=`);
+  halaman data mendukung `?q=` sehingga tautan tender mengarah ke hasil spesifik.

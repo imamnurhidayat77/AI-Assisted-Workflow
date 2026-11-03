@@ -330,9 +330,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1793704146.6522753,
-    "seen": 1793737642.680934,
-    "ast_hash": "2567e168c761e4bc0960f61e668c02eb",
+    "mtime": 1793740721.6445873,
+    "seen": 1793741279.143816,
+    "ast_hash": "094cc5d890c38a33d00c3a5f4ca68fc6",
     "semantic_hash": ""
   },
   "docs/01-requirements-brief.md": {
@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "docs/02-system-design.md": {
-    "mtime": 1793684775.4817338,
-    "seen": 1793685099.532585,
-    "ast_hash": "bafb9f3b11ccd31b47f7caecdd508e48",
+    "mtime": 1793740721.64456,
+    "seen": 1793741279.143863,
+    "ast_hash": "1515ea55fc004d5ae8c4acf3ac737786",
     "semantic_hash": ""
   },
   "docs/03-test-evaluation-plan.md": {
@@ -624,9 +624,9 @@
     "semantic_hash": ""
   },
   "packages/shared/src/rbac.test.ts": {
-    "mtime": 1793731615.1797378,
-    "seen": 1793737642.6808279,
-    "ast_hash": "e9449ce5368d2688a465afbc1f0acdfc",
+    "mtime": 1793741173.982071,
+    "seen": 1793741279.143788,
+    "ast_hash": "e252cc0fa3f27fd583fd800da2be2660",
     "semantic_hash": ""
   },
   "scripts/db-backup.sh": {
@@ -708,9 +708,9 @@
     "semantic_hash": ""
   },
   "docs/04-handover-guide.md": {
-    "mtime": 1793705069.3843658,
-    "seen": 1793737642.681869,
-    "ast_hash": "228a9d9d49b7356d8de7e05f5fc45f84",
+    "mtime": 1793740792.2518013,
+    "seen": 1793741279.143868,
+    "ast_hash": "ab50712c1c8cd09bff1c75eacde6ae8a",
     "semantic_hash": ""
   },
   "apps/api/eval/fixtures/ocr_quotation_1042.png": {
@@ -921,6 +921,12 @@
     "mtime": 1793739347.1527586,
     "seen": 1793739689.405154,
     "ast_hash": "3035e91cbcced8449c1be7f88fb6462c",
+    "semantic_hash": ""
+  },
+  "CHANGELOG.md": {
+    "mtime": 1793740816.7730436,
+    "seen": 1793741279.1438131,
+    "ast_hash": "af489f3d94e1bebd667cffd232066084",
     "semantic_hash": ""
   },
   ".opencode/package-lock.json": {

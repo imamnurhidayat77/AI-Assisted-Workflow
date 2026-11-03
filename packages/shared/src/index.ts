@@ -71,6 +71,9 @@ export interface SpaceItem {
   spaceId: string;
   kind: string;
   refId: string;
+  /** ID stabil record sumber bila ada (mis. conversation id) — dipakai untuk
+   * tautan draft yang eksplisit. Item lama mungkin kosong (hanya teks bebas). */
+  sourceId?: string;
   title: string;
   preview: string;
   createdAt: string;
@@ -567,6 +570,9 @@ export interface Draft {
   sourceQuotationId?: string;
   /** Tautan balik ke space (diisi saat draft dibuat dengan space aktif). */
   spaceId?: string;
+  /** Conversation asal draft (eksplisit, bukan tebakan). Diisi saat draft dibuat
+   * dari halaman conversation dengan thread aktif. */
+  sourceConversationId?: string;
   createdAt: string;
   updatedAt: string;
   decidedBy?: string;

@@ -4,7 +4,10 @@ import { canApproveDraft, isSpaceVisibility, type SpaceAction } from '@street-sm
 import { listDrafts as listAllDrafts } from '../services/drafts.js';
 import { requireAuth, type AuthUser } from '../services/auth.js';
 import { canEditSpace, canViewSpace, visibleSpaces } from '../services/spaceAccess.js';
+import { hasLinkedDraft } from '../services/spaceContext.js';
 import { getTenders } from '../services/tenders.js';
+import { documents } from '../services/documents.js';
+import { getThread } from '../services/conversations.js';
 
 const r = Router();
 const KINDS = new Set(['conversation', 'document', 'tender', 'note']);
@@ -160,19 +163,47 @@ r.post('/:id/items', requireAuth, async (req, res) => {
   };
   if (!canEditSpace(me, rec)) return res.status(404).json({ error: 'space not found' });
   if (rec.status === 'ARCHIVED') return res.status(409).json({ error: 'space is archived' });
+  // Validasi refId per kind + isi title/preview dari server agar bukan klaim client.
+  // sourceId opsional: id stabil record sumber (mis. conversation id) untuk tautan eksplisit.
+  let refId = String(req.body?.refId ?? '').slice(0, 200);
+  let sourceId = typeof req.body?.sourceId === 'string' && req.body.sourceId ? req.body.sourceId.slice(0, 64) : undefined;
+  let itemTitle = title;
+  let itemPreview = String(req.body?.preview ?? '').slice(0, 1000);
+  if (kind === 'tender') {
+    if (!refId && !sourceId) return res.status(400).json({ error: 'refId (tender id) is required' });
+    const tenderId = sourceId || refId;
+    const { rows } = await getTenders().catch(() => ({ rows: [] as { id: string; name: string; agency: string; value: string; date: string; status: string }[] }));
+    const t = rows.find((x) => x.id === tenderId);
+    if (!t) return res.status(404).json({ error: 'tender not found' });
+    if (sourceId) refId = sourceId;
+    itemTitle = `${t.id} — ${t.name}`;
+    itemPreview = `${t.agency} · ${t.value} · closes ${t.date} · ${t.status}`;
+  } else if (kind === 'document') {
+    if (!refId) return res.status(400).json({ error: 'refId (document id) is required' });
+    const doc = await documents.get(refId, me.role).catch(() => null);
+    if (!doc) return res.status(404).json({ error: 'document not found' });
+    itemTitle = doc.fileName;
+    itemPreview = `status: ${doc.status} · ${doc.sizeLabel}`;
+    // refId sudah berupa id dokumen; sourceId tidak dipakai untuk kind ini.
+    sourceId = undefined;
+  } else if (kind === 'conversation' && sourceId) {
+    const thread = await getThread(sourceId, { id: me.id, role: me.role }).catch(() => null);
+    if (!thread) return res.status(404).json({ error: 'conversation not found' });
+  }
   const item = await prisma.spaceItem.create({
     data: {
       spaceId: req.params.id,
       kind,
-      refId: String(req.body?.refId ?? '').slice(0, 200),
-      title,
-      preview: String(req.body?.preview ?? '').slice(0, 1000),
+      refId,
+      ...(sourceId ? { sourceId } : {}),
+      title: itemTitle,
+      preview: itemPreview,
       addedById: me.id,
       note: String(req.body?.note ?? '').slice(0, 280),
     },
   });
   await prisma.space.update({ where: { id: req.params.id }, data: { updatedAt: new Date() } });
-  await logActivity(prisma, space.id, me, 'ITEM_ADDED', `${kind}: ${title}`.slice(0, 280), item.id);
+  await logActivity(prisma, space.id, me, 'ITEM_ADDED', `${kind}: ${itemTitle}`.slice(0, 280), item.id);
   res.status(201).json(item);
 });
 
@@ -216,6 +247,7 @@ r.get('/:id/actions', requireAuth, async (req, res) => {
     return res.status(404).json({ error: 'space not found' });
   }
   const actions: SpaceAction[] = [];
+  const isArchived = (space.status as string) === 'ARCHIVED';
   try {
     const [drafts, items] = await Promise.all([
       listAllDrafts({ id: me.id, role: me.role }).catch(() => []),
@@ -238,25 +270,29 @@ r.get('/:id/actions', requireAuth, async (req, res) => {
     const now = Date.now();
     const N_DAYS = 7 * 86_400_000;
     // 2) Conversation lama (>N hari) tanpa draft tertaut → sarankan follow-up.
+    // Tautan dicek eksplisit via sourceConversationId (bukan kecocokan judul).
+    // Space arsip: read-only — tidak ada saran pekerjaan baru.
     for (const it of items) {
       if (it.kind !== 'conversation') continue;
+      if (isArchived) break;
       if (now - it.createdAt.getTime() < N_DAYS) continue;
-      const linked = drafts.some(
-        (d) => (d as { spaceId?: string | null }).spaceId === space.id && d.title.includes(it.title.slice(0, 40)),
-      );
-      if (linked) continue;
+      const srcId = (it as { sourceId?: string | null }).sourceId ?? null;
+      if (hasLinkedDraft(drafts as { spaceId?: string | null; sourceConversationId?: string | null }[], space.id, srcId)) continue;
       actions.push({
         type: 'FOLLOW_UP',
         title: `Follow up: ${it.title.slice(0, 80)}`,
-        reason: 'Conversation is over 7 days old with no linked draft',
+        reason: srcId
+          ? 'Conversation is over 7 days old with no linked draft'
+          : 'Conversation is over 7 days old with no tracked draft link',
         targetId: it.id,
-        href: `/conversation?q=${encodeURIComponent(it.refId || it.title)}`,
+        href: srcId ? `/conversation?c=${encodeURIComponent(srcId)}` : `/conversation?q=${encodeURIComponent(it.refId || it.title)}`,
         requiresApproval: false,
       });
       if (actions.length >= 10) break;
     }
     // 3) Tender yang segera tutup (hanya role yang boleh lihat tender).
-    if (me.role === 'sales' || me.role === 'operations' || me.role === 'management') {
+    // Dilewati untuk space arsip: tidak ada pekerjaan baru di space beku.
+    if (!isArchived && (me.role === 'sales' || me.role === 'operations' || me.role === 'management')) {
       const tenderItems = items.filter((it) => it.kind === 'tender' && it.refId);
       if (tenderItems.length) {
         const { rows } = await getTenders().catch(() => ({ rows: [] as { id: string; name: string; date: string; status: string }[] }));

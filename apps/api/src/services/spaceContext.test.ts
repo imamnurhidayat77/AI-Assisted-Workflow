@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSpaceContext, requireSpaceContext, scoreSpaces, type ContextLoaders } from './spaceContext.js';
+import { buildSpaceContext, hasLinkedDraft, requireSpaceContext, scoreSpaces, type ContextLoaders } from './spaceContext.js';
 
 function loaders(over: Partial<ContextLoaders> = {}): ContextLoaders {
   return {
@@ -83,6 +83,22 @@ describe('buildSpaceContext filtering', () => {
     assert.ok(hit && hit.spaceId === 'a');
     const miss = scoreSpaces(spaces, 'Halo, apa kabar?');
     assert.equal(miss, null);
+  });
+
+  it('hasLinkedDraft hanya cocok via sourceConversationId eksplisit', () => {
+    const drafts = [
+      { spaceId: 'sp-1', sourceConversationId: 'c-1' },
+      { spaceId: 'sp-1', sourceConversationId: 'c-2' },
+      { spaceId: 'sp-2', sourceConversationId: 'c-1' },
+      { spaceId: 'sp-1' },
+    ];
+    assert.equal(hasLinkedDraft(drafts, 'sp-1', 'c-1'), true);
+    assert.equal(hasLinkedDraft(drafts, 'sp-1', 'c-9'), false);
+    // Tanpa sourceId (item lama) tidak pernah cocok — bukan tebakan judul.
+    assert.equal(hasLinkedDraft(drafts, 'sp-1', null), false);
+    assert.equal(hasLinkedDraft(drafts, 'sp-1', undefined), false);
+    assert.equal(hasLinkedDraft(drafts, 'sp-9', 'c-1'), false);
+    assert.equal(hasLinkedDraft([], 'sp-1', 'c-1'), false);
   });
 
   it('output dibatasi budget (truncate + flag)', async () => {

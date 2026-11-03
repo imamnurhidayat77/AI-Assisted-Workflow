@@ -196,6 +196,9 @@ erDiagram
   - Draft ↔ space: `Draft.spaceId` (SetNull); create/approve/reject mencatat `SpaceActivity` (ITEM_ADDED/REMOVED, DRAFT_CREATED/APPROVED/REJECTED, CONTEXT_USED). `ChatAudit.spaceId` mencatat konteks pemakaian.
   - Saran simpan deterministik (`suggestedSpace`, keyword domain vs nama/deskripsi space, bukan tebakan model) dengan dismiss per pesan.
   - Template pembuatan (`SPACE_TEMPLATES` di shared): tender review, monthly close, distributor performance.
+  - Tautan follow-up eksplisit: draft ↔ conversation dihubungkan via `sourceConversationId`/`sourceId` yang divalidasi (bukan kecocokan judul); item lama tanpa tautan tidak pernah diklaim tertaut.
+  - Validasi referensi item: tender diverifikasi ke DB (judul/preview diisi server, bukan klaim client); dokumen dicek dalam scope role pembuat; conversation dicek kepemilikannya bila ada sourceId.
+  - Banner saran simpan bersifat non-blocking dengan dismiss persisten (localStorage per space+pesan); space arsip bersifat read-only (tanpa aksi follow-up/tender baru, review draft yang ada tetap bisa diputus).
 - Assistant registry (`packages/shared`): assistants × skills; semua grounding service DB-only (tanpa fallback mock — kosong = jawaban "belum ada data" yang eksplisit).
 - Migrations: `prisma migrate dev` (atau `deploy`); client generated via `prisma:generate`. DB = Neon `production` (lihat AGENTS.md).
 

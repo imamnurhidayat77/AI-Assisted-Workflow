@@ -4,7 +4,7 @@ import { documents } from './documents.js';
 import { getThread } from './conversations.js';
 import { getTenders } from './tenders.js';
 import { listDrafts } from './drafts.js';
-import { canViewSpace } from './spaceAccess.js';
+import { canEditSpace, canViewSpace } from './spaceAccess.js';
 
 // Konteks space untuk grounding chat: bounded, role-filtered, tanpa isi mentah.
 // Loader di-inject agar logika filter/budget bisa di-unit-test tanpa DB.
@@ -241,20 +241,17 @@ export async function suggestSpace(input: {
     const prisma = await db();
     if (!prisma) return null;
     const rows = await prisma.space.findMany({ orderBy: { updatedAt: 'desc' }, take: 50 });
+    // Saran hanya untuk space aktif yang bisa dilihat DAN ditulis user.
     const editable = rows.filter(
       (s) =>
         s.status === 'ACTIVE' &&
-        canViewSpace(input.viewer, {
+        canEditSpace(input.viewer, {
           ...s,
           ownerId: s.ownerId,
           ownerRole: s.ownerRole,
           visibility: s.visibility as 'PRIVATE' | 'ROLE',
           status: s.status as 'ACTIVE' | 'ARCHIVED',
-        }) &&
-        // Saran hanya untuk space yang bisa ditulisi user.
-        (s.ownerId === input.viewer.id ||
-          input.viewer.role === 'management' ||
-          !s.ownerId),
+        }),
     );
     if (!editable.length) return null;
     const text = `${input.message} ${input.tenderIds.join(' ')}`;
@@ -286,6 +283,19 @@ export function formatSpaceContext(ctx: SpaceContext): string[] {
   }
   if (ctx.truncated) lines.push('(context truncated to budget — ask for specifics to expand)');
   return lines;
+}
+
+/** Apakah ada draft yang tertaut eksplisit ke conversation ini di space yang sama.
+ * Hanya pencocokan ID eksplisit (sourceConversationId) — TIDAK memakai
+ * pencocokan judul/teks yang rapuh dan bisa salah taut. Item lama tanpa
+ * sourceId selalu dianggap tidak tertaut (jujur: tidak ada tautan terlacak). */
+export function hasLinkedDraft(
+  drafts: { spaceId?: string | null; sourceConversationId?: string | null }[],
+  spaceId: string,
+  sourceConversationId: string | null | undefined,
+): boolean {
+  if (!sourceConversationId) return false;
+  return drafts.some((d) => d.spaceId === spaceId && d.sourceConversationId === sourceConversationId);
 }
 
 /** Apakah konteks punya isi yang layak disitasi (bukan space kosong). */

@@ -172,7 +172,33 @@ function Body() {
   const [spaceId, setSpaceId] = useState<string>(initialSpaceId);
   const [spaceName, setSpaceName] = useState('');
   const [suggested, setSuggested] = useState<{ space: SuggestedSpace; forQuestion: string } | null>(null);
-  const [dismissedSuggest, setDismissedSuggest] = useState('');
+  // Dismiss bertahan antar sesi via localStorage (bukan state in-memory saja).
+  // Kunci = space + pertanyaan, jadi pesan yang sama tak ditawarkan ulang.
+  const dismissedKey = (spaceId: string, q: string) => `${spaceId}::${q.slice(0, 120)}`;
+  const [dismissedKeys, setDismissedKeys] = useState<string[]>(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('suggested-space-dismissed') : null;
+      return raw ? Object.keys(JSON.parse(raw) as Record<string, number>) : [];
+    } catch {
+      return [];
+    }
+  });
+  const isDismissed = (spaceId: string, q: string) => dismissedKeys.includes(dismissedKey(spaceId, q));
+  const markDismissed = (spaceId: string, q: string) => {
+    const key = dismissedKey(spaceId, q);
+    setDismissedKeys((prev) => (prev.includes(key) ? prev : [...prev.slice(-49), key]));
+    try {
+      const raw = localStorage.getItem('suggested-space-dismissed');
+      const map = (raw ? JSON.parse(raw) : {}) as Record<string, number>;
+      map[key] = Date.now();
+      const keys = Object.keys(map).sort((a, b) => map[b] - map[a]).slice(0, 50);
+      const trimmed: Record<string, number> = {};
+      for (const k of keys) trimmed[k] = map[k];
+      localStorage.setItem('suggested-space-dismissed', JSON.stringify(trimmed));
+    } catch {
+      // abaikan — fallback ke state in-memory saja
+    }
+  };
 
   const ask = async (message: string) => {
     // Pindahkan turn aktif ke riwayat sebelum mulai yang baru (bukan pada pesan pertama).
@@ -202,7 +228,6 @@ function Body() {
     // Fallback HANYA untuk kasus offline/error: jawaban error eksplisit, bukan narasi simulasi.
     // Kasus denied tetap pesan akses (bukan data) — tidak mengarang isi jawaban.
     const fallback = roleGate.denied ? deniedAnswer(deniedName, roleName) : offlineAnswer();
-    setDismissedSuggest('');
     const showDenied = () => {
       setAnswer(deniedAnswer(deniedName, roleName));
       answeredRef.current = true;
@@ -288,6 +313,8 @@ function Body() {
       sources: answer.sources ?? [],
       tenderIds: answer.tenderIds ?? [],
       ...(spaceId ? { spaceId } : {}),
+      // Tautan eksplisit ke thread asal (bukan tebakan) agar follow-up space akurat.
+      ...(convId ? { sourceConversationId: convId } : {}),
     };
     const created = await api.post<Draft | null>('/api/drafts', payload, null);
     if (!created) {
@@ -350,6 +377,8 @@ function Body() {
     const created = await api.post(`/api/spaces/${spaceId}/items`, {
       kind: 'conversation',
       refId: question,
+      // sourceId eksplisit bila thread sudah tersimpan — untuk tautan follow-up.
+      ...(convId ? { sourceId: convId } : {}),
       title: question.length > 120 ? `${question.slice(0, 120)}…` : question,
       preview: answer.answerTitle,
     }, null);
@@ -379,18 +408,20 @@ function Body() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionUser?.id]);
 
-  // Simpan jawaban ke space yang disarankan (sekali klik, bisa dismiss per pesan).
+  // Simpan jawaban ke space yang disarankan (sekali klik, dismiss tersimpan).
   const saveSuggested = async () => {
     if (!suggested) return;
     const created = await api.post(`/api/spaces/${suggested.space.spaceId}/items`, {
       kind: 'conversation',
       refId: suggested.forQuestion.slice(0, 200),
+      // sourceId eksplisit bila thread sudah ada — untuk tautan follow-up yang andal.
+      ...(convId ? { sourceId: convId } : {}),
       title: suggested.forQuestion.slice(0, 120),
       preview: answer.answerTitle,
     }, null);
     if (created) {
       toast(`Saved to "${suggested.space.name}"`);
-      setDismissedSuggest(suggested.forQuestion);
+      markDismissed(suggested.space.spaceId, suggested.forQuestion);
       setSuggested(null);
     } else {
       toast('Could not save — sign in first or check the API');
@@ -489,6 +520,19 @@ function Body() {
               ? <Button key={i} variant={i === 0 ? 'primary' : 'secondary'} onClick={() => newDraft(a.draftKind!)}>{a.label}</Button>
               : <Link key={i} className={`btn ${i === 0 ? 'btn-primary' : 'btn-secondary'}`} href={a.href ?? '/'}>{a.label}</Link>)}
           </div>}
+          {suggested && suggested.forQuestion === question && !isDismissed(suggested.space.spaceId, suggested.forQuestion) && (
+            <div className="recommendation" role="status" aria-label="Suggested space">
+              <div className="recommendation-icon"><Icon name="grid" size={18} /></div>
+              <div style={{ flex: 1 }}>
+                <div className="recommendation-title">Save to “{suggested.space.name}”?</div>
+                <div>{suggested.space.reason}</div>
+              </div>
+              <div className="action-row" style={{ marginTop: 0 }}>
+                <Button variant="primary" onClick={saveSuggested}>Save</Button>
+                <Button variant="ghost" onClick={() => { markDismissed(suggested.space.spaceId, suggested.forQuestion); setSuggested(null); }}>Dismiss</Button>
+              </div>
+            </div>
+          )}
           {draft && (() => {
             // Tombol mengikuti peran: maker (pemilik) hanya edit + submit/withdraw,
             // checker (ops/mgmt bukan pembuat, lolos maker-checker) yang approve/reject.

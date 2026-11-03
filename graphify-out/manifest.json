@@ -782,7 +782,7 @@
   "apps/api/prisma/migrations/20261102110000_status_enums/migration.sql": {
     "mtime": 1793685458.7488225,
     "seen": 1793737642.6776829,
-    "ast_hash": "11d598bb9a5cab03d3bb35988c747f63",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "apps/api/src/services/quotations.ts": {

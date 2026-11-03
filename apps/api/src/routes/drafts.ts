@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { emitDraftChanged } from '../realtime.js';
 import { canApproveDraft, isDraftStatus, type RoleId } from '@street-smart/shared';
 import { createDraft, editDraft, getDraft, listAllDrafts, listDrafts, setDraftStatus } from '../services/drafts.js';
+import { getThread } from '../services/conversations.js';
 import { requireAuth, type AuthUser } from '../services/auth.js';
 import { canViewSpace } from '../services/spaceAccess.js';
 import { logSpaceActivity } from '../services/spaceContext.js';
@@ -158,7 +159,18 @@ r.post('/', requireAuth, async (req, res) => {
       }
       spaceId = rawSpace;
     }
-    const d = await createDraft({ ...(req.body ?? {}), createdBy: me.id, spaceId });
+    // sourceConversationId opsional: harus thread yang ada DAN boleh dilihat pembuat.
+    // Tanpa ini draft tidak boleh mengklaim asal conversation (anti spoofing tautan).
+    let sourceConversationId: string | undefined;
+    const rawConv = typeof req.body?.sourceConversationId === 'string' && req.body.sourceConversationId
+      ? req.body.sourceConversationId.slice(0, 64)
+      : undefined;
+    if (rawConv) {
+      const thread = await getThread(rawConv, { id: me.id, role: me.role }).catch(() => null);
+      if (!thread) return res.status(404).json({ error: 'conversation not found' });
+      sourceConversationId = rawConv;
+    }
+    const d = await createDraft({ ...(req.body ?? {}), createdBy: me.id, spaceId, sourceConversationId });
     if (spaceId) {
       await logSpaceActivity({
         spaceId, actorId: me.id, actorRole: me.role,

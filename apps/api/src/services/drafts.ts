@@ -23,6 +23,7 @@ type Row = {
   sourceDocumentId: string | null;
   sourceDocumentName: string | null;
   sourceQuotationId: string | null;
+  sourceConversationId: string | null;
   spaceId: string | null;
   decidedBy: string | null;
   decidedAt: Date | null;
@@ -58,6 +59,7 @@ function toDraft(r: Row): Draft {
     tenderIds: asStrings(r.tenderIds),
     sourceDocumentId: r.sourceDocumentId ?? undefined,
     sourceQuotationId: r.sourceQuotationId ?? undefined,
+    sourceConversationId: r.sourceConversationId ?? undefined,
     spaceId: r.spaceId ?? undefined,
     sourceDocumentName: r.sourceDocumentName ?? undefined,
     createdAt: r.createdAt.toISOString(),
@@ -141,6 +143,8 @@ class DraftStore {
         typeof input.sourceDocumentName === 'string' ? input.sourceDocumentName.slice(0, 200) : undefined,
       sourceQuotationId:
         typeof input.sourceQuotationId === 'string' ? input.sourceQuotationId.slice(0, 64) : undefined,
+      sourceConversationId:
+        typeof input.sourceConversationId === 'string' && input.sourceConversationId ? input.sourceConversationId.slice(0, 64) : undefined,
       spaceId: typeof input.spaceId === 'string' && input.spaceId ? input.spaceId.slice(0, 64) : undefined,
       createdAt: now,
       updatedAt: now,
@@ -161,6 +165,7 @@ class DraftStore {
         tenderIds: base.tenderIds ?? [],
         sourceDocumentId: base.sourceDocumentId,
         sourceQuotationId: base.sourceQuotationId ?? null,
+        sourceConversationId: base.sourceConversationId ?? null,
         spaceId: base.spaceId ?? null,
         sourceDocumentName: base.sourceDocumentName,
         history: asJson(base.history),
@@ -232,6 +237,7 @@ export interface CreateDraftInput {
   sourceDocumentId?: unknown;
   sourceDocumentName?: unknown;
   sourceQuotationId?: unknown;
+  sourceConversationId?: unknown;
   spaceId?: unknown;
 }
 

@@ -9,10 +9,12 @@ import { useToast } from '@/lib/store';
 import type { Draft, SpaceActivity, SpaceDetail, SpaceAction } from '@street-smart/shared';
 
 const KIND_ICON: Record<string, IconName> = { conversation: 'chat', document: 'file', tender: 'database', note: 'grid' };
-const KIND_LINK: Record<string, (refId: string, title: string) => string | null> = {
-  conversation: (_r, t) => `/conversation?q=${encodeURIComponent(t)}`,
+// Pakai sourceId bila ada (tautan eksplisit ke thread/conversation asli),
+// fallback ke query teks untuk item lama.
+const KIND_LINK: Record<string, (it: { refId?: string; title: string; sourceId?: string }) => string | null> = {
+  conversation: (it) => (it.sourceId ? `/conversation?c=${encodeURIComponent(it.sourceId)}` : `/conversation?q=${encodeURIComponent(it.refId || it.title)}`),
   document: () => '/documents',
-  tender: (r) => (r ? `/data` : null),
+  tender: (it) => (it.refId ? `/data?q=${encodeURIComponent(it.refId)}` : '/data'),
   note: () => null,
 };
 
@@ -148,7 +150,7 @@ export default function SpaceDetailPage() {
         {Object.entries(byKind).map(([kind, list]) => <div key={kind} style={{ marginTop: 8 }}>
           <div className="table-subtitle" style={{ textTransform: 'capitalize', fontWeight: 700 }}>{kind}s ({list.length})</div>
           <div className="job-list">{list.map((item) => {
-            const href = KIND_LINK[item.kind]?.(item.refId, item.title);
+            const href = KIND_LINK[item.kind]?.({ refId: item.refId, title: item.title, sourceId: (item as { sourceId?: string }).sourceId });
             return <div className="job-row" key={item.id}>
               <div className="job-main"><div className="job-icon"><Icon name={KIND_ICON[item.kind] ?? 'grid'} /></div><div><div className="job-name">{item.title}</div><div className="job-agent">{(item.preview || '—').slice(0, 100)}{item.addedById ? ` · added by ${item.addedById}` : ''}{item.note ? ` · “${item.note}”` : ''}</div></div></div>
               <div className="toolbar-actions">

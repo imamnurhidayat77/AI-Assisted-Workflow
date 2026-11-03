@@ -54,6 +54,7 @@ model Conversation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   messages    Message[]
+  drafts      Draft[]
 
   @@index([createdBy, updatedAt])
 }
@@ -150,6 +151,9 @@ model SpaceItem {
   space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   kind      String   // conversation | document | tender | note
   refId     String   @default("")
+  // ID stabil record sumber bila ada (conversation id; tender/document id biasanya == refId).
+  // Dipakai untuk tautan draft yang eksplisit — tanpa ini hanya teks bebas.
+  sourceId  String?
   title     String
   preview   String   @default("")
   addedById String?
@@ -189,6 +193,8 @@ model Draft {
   sourceDocumentId String?
   sourceDocumentName String?
   sourceQuotationId String? // tautan balik draft → quotation (aliran approval otomatis)
+  sourceConversationId String? // conversation asal draft (eksplisit, bukan tebakan judul)
+  sourceConversation Conversation? @relation(fields: [sourceConversationId], references: [id], onDelete: SetNull)
   decidedBy        String?
   decidedAt        DateTime?
   history          Json      @default("[]")

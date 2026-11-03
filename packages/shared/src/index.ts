@@ -256,6 +256,8 @@ export interface ChatResponse {
   skillsUsed?: string[];
   /** Aksi kontekstual dari AI (disanitasi server). Kosong = tidak ada tombol. */
   actions?: SuggestedAction[];
+  /** Saran simpan ke space (deterministik per domain, bukan tebakan model). */
+  suggestedSpace?: SuggestedSpace;
 }
 
 /** Sanitasi actions dari AI: whitelist kind/href, label pendek, maks 3. Pure. */

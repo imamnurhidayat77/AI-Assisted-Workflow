@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { isSpaceVisibility } from '@street-smart/shared';
+import { canApproveDraft, isSpaceVisibility, type SpaceAction } from '@street-smart/shared';
 import { listDrafts as listAllDrafts } from '../services/drafts.js';
 import { requireAuth, type AuthUser } from '../services/auth.js';
 import { canEditSpace, canViewSpace, visibleSpaces } from '../services/spaceAccess.js';
+import { getTenders } from '../services/tenders.js';
 
 const r = Router();
 const KINDS = new Set(['conversation', 'document', 'tender', 'note']);
@@ -48,7 +49,13 @@ r.get('/', requireAuth, async (_req, res) => {
   if (!prisma) return res.status(503).json({ error: 'database offline' });
   try {
     const [spaces, drafts] = await Promise.all([
-      prisma.space.findMany({ orderBy: { updatedAt: 'desc' }, include: { items: { select: { kind: true } } } }),
+      prisma.space.findMany({
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          items: { select: { kind: true } },
+          activities: { select: { createdAt: true }, orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+      }),
       listAllDrafts({ id: me.id, role: me.role }).catch(() => []),
     ]);
     const visible = visibleSpaces(me, spaces.map((s) => ({
@@ -83,6 +90,7 @@ r.get('/', requireAuth, async (_req, res) => {
         return acc;
       }, {}),
       pendingActions: pendingBySpace.get(s.id) ?? 0,
+      lastActivityAt: ((s as unknown as { activities: { createdAt: Date }[] }).activities[0]?.createdAt ?? s.updatedAt).toISOString(),
     })));
   } catch {
     res.status(503).json({ error: 'database unreachable' });
@@ -187,6 +195,90 @@ r.delete('/:id/items/:itemId', requireAuth, async (req, res) => {
   await prisma.space.update({ where: { id: req.params.id }, data: { updatedAt: new Date() } });
   await logActivity(prisma, space.id, me, 'ITEM_REMOVED', `${existing.kind}: ${existing.title}`.slice(0, 280), existing.id);
   res.json({ ok: true });
+});
+
+// GET /api/spaces/:id/actions — saran aksi turunan data (bukan karangan).
+// Hanya aksi yang boleh dilakukan user: review draft yang ia bisa approve,
+// follow-up conversation lama tanpa draft tertaut, tender yang segera tutup.
+r.get('/:id/actions', requireAuth, async (req, res) => {
+  const me = meOf(res);
+  const prisma = await db();
+  if (!prisma) return res.status(503).json({ error: 'database offline' });
+  const space = await prisma.space.findUnique({ where: { id: req.params.id } });
+  if (!space) return res.status(404).json({ error: 'space not found' });
+  if (!canViewSpace(me, {
+    ...space,
+    ownerId: space.ownerId,
+    ownerRole: space.ownerRole,
+    visibility: space.visibility as 'PRIVATE' | 'ROLE',
+    status: space.status as 'ACTIVE' | 'ARCHIVED',
+  })) {
+    return res.status(404).json({ error: 'space not found' });
+  }
+  const actions: SpaceAction[] = [];
+  try {
+    const [drafts, items] = await Promise.all([
+      listAllDrafts({ id: me.id, role: me.role }).catch(() => []),
+      prisma.spaceItem.findMany({ where: { spaceId: space.id }, orderBy: { createdAt: 'desc' } }),
+    ]);
+    // 1) Draft in_review yang bisa diputus user ini (maker-checker aware).
+    for (const d of drafts) {
+      const sd = d as typeof d & { spaceId?: string | null };
+      if (sd.spaceId !== space.id || d.status !== 'in_review' || d.createdBy === me.id) continue;
+      if (!canApproveDraft(d, { id: me.id, role: me.role })) continue;
+      actions.push({
+        type: 'REVIEW_DRAFT',
+        title: `Review: ${d.title}`,
+        reason: `Awaiting your decision as checker (${d.kind})`,
+        targetId: d.id,
+        href: '/inbox',
+        requiresApproval: true,
+      });
+    }
+    const now = Date.now();
+    const N_DAYS = 7 * 86_400_000;
+    // 2) Conversation lama (>N hari) tanpa draft tertaut → sarankan follow-up.
+    for (const it of items) {
+      if (it.kind !== 'conversation') continue;
+      if (now - it.createdAt.getTime() < N_DAYS) continue;
+      const linked = drafts.some(
+        (d) => (d as { spaceId?: string | null }).spaceId === space.id && d.title.includes(it.title.slice(0, 40)),
+      );
+      if (linked) continue;
+      actions.push({
+        type: 'FOLLOW_UP',
+        title: `Follow up: ${it.title.slice(0, 80)}`,
+        reason: 'Conversation is over 7 days old with no linked draft',
+        targetId: it.id,
+        href: `/conversation?q=${encodeURIComponent(it.refId || it.title)}`,
+        requiresApproval: false,
+      });
+      if (actions.length >= 10) break;
+    }
+    // 3) Tender yang segera tutup (hanya role yang boleh lihat tender).
+    if (me.role === 'sales' || me.role === 'operations' || me.role === 'management') {
+      const tenderItems = items.filter((it) => it.kind === 'tender' && it.refId);
+      if (tenderItems.length) {
+        const { rows } = await getTenders().catch(() => ({ rows: [] as { id: string; name: string; date: string; status: string }[] }));
+        for (const it of tenderItems) {
+          const t = rows.find((r) => r.id === it.refId);
+          if (!t || t.status === 'Won' || t.status === 'Lost') continue;
+          actions.push({
+            type: 'OPEN_ITEM',
+            title: `Closing soon: ${t.name}`,
+            reason: `Closes ${t.date} — consider a response brief`,
+            targetId: t.id,
+            href: '/data',
+            requiresApproval: false,
+          });
+          if (actions.length >= 10) break;
+        }
+      }
+    }
+    res.json({ actions: actions.slice(0, 10) });
+  } catch {
+    res.status(503).json({ error: 'actions unavailable' });
+  }
 });
 
 // POST /api/spaces/:id/archive — arsipkan space (satu arah; pemilik / management).

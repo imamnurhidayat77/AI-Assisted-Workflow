@@ -15,6 +15,21 @@ enum TenderStatus {
   LOST
 }
 
+enum DraftStatus {
+  draft
+  in_review
+  approved
+  rejected
+}
+
+enum QuotationStatus {
+  draft
+  sent
+  approved
+  rejected
+  expired
+}
+
 model Tender {
   id        String       @id // e.g. TND-2026-001
   name      String
@@ -88,15 +103,45 @@ model Job {
 
 /// Persistent workspace (Joule-style Space): groups saved conversations,
 /// documents, tenders and notes around a business goal.
+enum SpaceVisibility {
+  PRIVATE
+  ROLE
+}
+
+enum SpaceStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum SpaceActivityType {
+  SPACE_CREATED
+  SPACE_ARCHIVED
+  ITEM_ADDED
+  ITEM_REMOVED
+  DRAFT_CREATED
+  DRAFT_APPROVED
+  DRAFT_REJECTED
+  CONTEXT_USED
+}
+
 model Space {
-  id          String      @id @default(cuid())
+  id          String           @id @default(cuid())
   name        String
-  description String      @default("")
-  tone        String      @default("blue") // amber | blue | green | purple
-  icon        String      @default("grid")
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  description String           @default("")
+  tone        String           @default("blue") // amber | blue | green | purple
+  icon        String           @default("grid")
+  ownerId     String? // AppUser.id pembuat; NULL = legacy (dibuat sebelum ownership)
+  ownerRole   String           @default("")
+  visibility  SpaceVisibility  @default(PRIVATE)
+  status      SpaceStatus      @default(ACTIVE)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
   items       SpaceItem[]
+  activities  SpaceActivity[]
+  drafts      Draft[]
+
+  @@index([ownerId])
+  @@index([status])
 }
 
 model SpaceItem {
@@ -107,9 +152,27 @@ model SpaceItem {
   refId     String   @default("")
   title     String
   preview   String   @default("")
+  addedById String?
+  addedAt   DateTime @default(now())
+  note      String   @default("")
   createdAt DateTime @default(now())
 
   @@index([spaceId])
+}
+
+/// Jejak audit per space: ringkasan saja, tanpa isi mentah sensitif.
+model SpaceActivity {
+  id        String            @id @default(cuid())
+  spaceId   String
+  space     Space             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  actorId   String
+  actorRole String
+  type      SpaceActivityType
+  refId     String?
+  summary   String            @db.VarChar(280)
+  createdAt DateTime          @default(now())
+
+  @@index([spaceId, createdAt])
 }
 
 // Keputusan manusia atas draft AI — audit permanen (AI drafter, human decider).
@@ -118,7 +181,7 @@ model Draft {
   kind             String    @default("general")
   title            String
   body             String    @db.Text
-  status           String    @default("draft") // draft | in_review | approved | rejected
+  status           DraftStatus @default(draft)
   assistantId      String?
   skillsUsed       Json      @default("[]")
   sources          Json      @default("[]")
@@ -130,10 +193,13 @@ model Draft {
   decidedAt        DateTime?
   history          Json      @default("[]")
   createdBy        String? // AppUser.id pembuat — list difilter per user (mgmt: semua)
+  spaceId          String? // tautan opsional draft ↔ space (aliran approval di workspace)
+  space            Space?  @relation(fields: [spaceId], references: [id], onDelete: SetNull)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   @@index([createdBy])
+  @@index([spaceId])
 }
 
 enum InvoiceDirection {
@@ -209,6 +275,7 @@ model ChatAudit {
   assistantId   String
   messagePreview String  @db.VarChar(200)
   via           String   @default("mock")
+  spaceId       String? // konteks space aktif saat chat (nullable)
   createdAt     DateTime @default(now())
 
   @@index([userId, createdAt])
@@ -245,7 +312,7 @@ model Quotation {
   tenderId    String?   // tautan ke Tender.id bila terkait tender
   amountCents Int
   currency    String    @default("NZD")
-  status      String    @default("draft") // draft | sent | approved | rejected | expired
+  status      QuotationStatus @default(draft)
   validUntil  DateTime?
   createdBy   String?   // AppUser.id pembuat — list milik sendiri (mgmt: semua)
   createdAt   DateTime  @default(now())

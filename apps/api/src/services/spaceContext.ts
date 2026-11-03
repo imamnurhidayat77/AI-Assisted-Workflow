@@ -56,6 +56,33 @@ export interface ContextLoaders {
   loadActivity: (spaceId: string, take: number) => Promise<{ type: string; actorRole: string; summary: string; createdAt: Date }[]>;
 }
 
+/** Tulis satu baris aktivitas space (ringkasan saja). Best-effort, tidak throw. */
+export async function logSpaceActivity(input: {
+  spaceId: string;
+  actorId: string;
+  actorRole: string;
+  type: 'SPACE_CREATED' | 'SPACE_ARCHIVED' | 'ITEM_ADDED' | 'ITEM_REMOVED' | 'DRAFT_CREATED' | 'DRAFT_APPROVED' | 'DRAFT_REJECTED' | 'CONTEXT_USED';
+  summary: string;
+  refId?: string;
+}): Promise<void> {
+  try {
+    const prisma = await db();
+    if (!prisma) return;
+    await prisma.spaceActivity.create({
+      data: {
+        spaceId: input.spaceId,
+        actorId: input.actorId,
+        actorRole: input.actorRole,
+        type: input.type,
+        summary: input.summary.slice(0, 280),
+        refId: input.refId?.slice(0, 64),
+      },
+    });
+  } catch {
+    // best-effort
+  }
+}
+
 let client: PrismaClient | null = null;
 
 async function db(): Promise<PrismaClient | null> {
@@ -152,6 +179,135 @@ export const defaultLoaders: ContextLoaders = {
 
 function tenderVisibleTo(role: RoleId): boolean {
   return role === 'sales' || role === 'operations' || role === 'management';
+}
+
+type SuggestDomain = 'tender' | 'finance' | 'hr' | 'ops' | 'distributor';
+
+const DOMAIN_ANCHORS: Record<SuggestDomain, RegExp[]> = {
+  tender: [/tender/i, /brief/i, /pipeline/i, /\bquot/i, /review/i, /opportunity/i],
+  finance: [/finance/i, /invoice/i, /closing/i, /accrual/i, /payment/i, /\bAR\b|\bAP\b/],
+  hr: [/\bhr\b/i, /leave/i, /cuti/i, /policy/i, /team/i, /capacity/i, /people/i],
+  ops: [/operation/i, /\bops\b/i, /job/i, /document/i, /import/i, /deadline/i, /sync/i],
+  distributor: [/distributor/i, /sales/i, /performance/i, /\bNZ\b/, /\bAU\b/i, /quarter/i],
+};
+
+const DOMAIN_REASON: Record<SuggestDomain, string> = {
+  tender: 'This answer is about tenders and the space tracks tender work',
+  finance: 'This answer is about finance and the space tracks finance work',
+  hr: 'This answer is about people topics and the space tracks HR work',
+  ops: 'This answer is about operations and the space tracks ops work',
+  distributor: 'This answer is about distributor sales and the space tracks sales performance',
+};
+
+export interface SpaceCandidate {
+  id: string;
+  name: string;
+  description: string;
+  ownerId: string | null;
+  ownerRole: string;
+  visibility: 'PRIVATE' | 'ROLE';
+  status: 'ACTIVE' | 'ARCHIVED';
+}
+
+/** Skor space vs pesan — pure, di-unit-test. */
+export function scoreSpaces(
+  spaces: { id: string; name: string; description: string }[],
+  text: string,
+): { spaceId: string; name: string; score: number; domain: SuggestDomain } | null {
+  let best: { spaceId: string; name: string; score: number; domain: SuggestDomain } | null = null;
+  for (const s of spaces) {
+    const hay = `${s.name} ${s.description}`;
+    for (const domain of Object.keys(DOMAIN_ANCHORS) as SuggestDomain[]) {
+      const anchors = DOMAIN_ANCHORS[domain];
+      const inMsg = anchors.filter((re) => re.test(text)).length;
+      const inSpace = anchors.filter((re) => re.test(hay)).length;
+      if (inMsg > 0 && inSpace > 0) {
+        const score = inMsg + inSpace;
+        if (!best || score > best.score) best = { spaceId: s.id, name: s.name, score, domain };
+      }
+    }
+  }
+  return best;
+}
+
+/** Saran space untuk jawaban chat: hanya space yang bisa diedit user,
+ * cocok domain (keyword, bukan tebakan LLM), dan status aktif. */
+export async function suggestSpace(input: {
+  viewer: SpaceViewer;
+  message: string;
+  tenderIds: string[];
+}): Promise<{ spaceId: string; name: string; reason: string } | null> {
+  try {
+    const prisma = await db();
+    if (!prisma) return null;
+    const rows = await prisma.space.findMany({ orderBy: { updatedAt: 'desc' }, take: 50 });
+    const editable = rows.filter(
+      (s) =>
+        s.status === 'ACTIVE' &&
+        canViewSpace(input.viewer, {
+          ...s,
+          ownerId: s.ownerId,
+          ownerRole: s.ownerRole,
+          visibility: s.visibility as 'PRIVATE' | 'ROLE',
+          status: s.status as 'ACTIVE' | 'ARCHIVED',
+        }) &&
+        // Saran hanya untuk space yang bisa ditulisi user.
+        (s.ownerId === input.viewer.id ||
+          input.viewer.role === 'management' ||
+          !s.ownerId),
+    );
+    if (!editable.length) return null;
+    const text = `${input.message} ${input.tenderIds.join(' ')}`;
+    const best = scoreSpaces(
+      editable.map((s) => ({ id: s.id, name: s.name, description: s.description })),
+      text,
+    );
+    if (!best) return null;
+    return { spaceId: best.spaceId, name: best.name, reason: DOMAIN_REASON[best.domain] };
+  } catch {
+    return null;
+  }
+}
+
+/** Format konteks space menjadi blok prompt (sudah bounded di build). */
+export function formatSpaceContext(ctx: SpaceContext): string[] {
+  const lines = [
+    `Space: ${ctx.name}${ctx.description ? ` — ${ctx.description}` : ''} (${ctx.items.length} items, ${ctx.pendingDrafts.length} pending drafts)`,
+  ];
+  for (const it of ctx.items) {
+    const body = it.detail.length > 220 ? `${it.detail.slice(0, 220)}…` : it.detail;
+    lines.push(`- [${it.kind}] ${it.title}${body ? `: ${body}` : ''}`);
+  }
+  for (const d of ctx.pendingDrafts) {
+    lines.push(`- [draft:${d.status}] ${d.title} (${d.kind})`);
+  }
+  for (const a of ctx.recentActivity.slice(0, 5)) {
+    lines.push(`- [activity] ${a.summary}`);
+  }
+  if (ctx.truncated) lines.push('(context truncated to budget — ask for specifics to expand)');
+  return lines;
+}
+
+/** Apakah konteks punya isi yang layak disitasi (bukan space kosong). */
+export function hasSpaceContent(ctx: SpaceContext | null | undefined): boolean {
+  return Boolean(ctx && (ctx.items.length > 0 || ctx.pendingDrafts.length > 0));
+}
+
+/** Resolve konteks untuk chat: 404 (tak ada/tak boleh lihat) → 403 denied yang
+ * jelas; 503 (DB mati) diteruskan apa adanya. Pure-ish, di-unit-test. */
+export async function requireSpaceContext(
+  spaceId: string,
+  viewer: SpaceViewer,
+  loaders: ContextLoaders = defaultLoaders,
+): Promise<SpaceContext> {
+  try {
+    return await buildSpaceContext(spaceId, viewer, loaders);
+  } catch (e) {
+    const withStatus = e as { status?: unknown };
+    const status = typeof withStatus.status === 'number' ? withStatus.status : 500;
+    if (status === 503) throw e;
+    throw Object.assign(new Error('space is not available to you (missing or not shared with your role)'), { status: 403 });
+  }
 }
 
 /** Bangun konteks space yang bounded & role-filtered. Throw 404 (tak ada / tak boleh lihat). */

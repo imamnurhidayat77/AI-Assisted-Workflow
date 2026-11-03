@@ -8,6 +8,7 @@ import {
   type RoleId,
 } from '@street-smart/shared';
 import { chatWithAI } from '../services/llm.js';
+import { logSpaceActivity, requireSpaceContext, suggestSpace } from '../services/spaceContext.js';
 import { appendExchange, openConversation } from '../services/conversations.js';
 import { getTenders } from '../services/tenders.js';
 import { getFinanceSnapshot } from '../services/finance.js';
@@ -28,7 +29,8 @@ const r = Router();
 
 // POST /api/chat  { message, assistantId? } — wajib X-API-Key.
 // Role diambil dari user terautentikasi (bukan dari body — cegah spoofing).
-// Tanpa assistantId → infer dari pesan, lalu otorisasi terhadap role user.
+// Tanpa assistantId → default ke assistant role user (Auto = asisten role-ku),
+// lalu otorisasi terhadap role user. Infer dari pesan hanya bila role tak dikenal.
 r.post('/', requireAuth, chatLimiter, async (req, res) => {
   const user = (res as unknown as { locals: { user: AuthUser } }).locals.user;
   const message = String(req.body?.message ?? '').slice(0, 4000);
@@ -36,17 +38,30 @@ r.post('/', requireAuth, chatLimiter, async (req, res) => {
   const assistantId = typeof req.body?.assistantId === 'string' ? req.body.assistantId.slice(0, 64) : undefined;
   const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId.slice(0, 64) : undefined;
   const conversationId = typeof req.body?.conversationId === 'string' ? req.body.conversationId.slice(0, 64) : undefined;
+  const spaceId = typeof req.body?.spaceId === 'string' && req.body.spaceId ? req.body.spaceId.slice(0, 64) : undefined;
   if (assistantId && !getAssistant(assistantId)) {
     return res.status(400).json({ error: `unknown assistantId: ${assistantId}` });
   }
-  // Resolve dulu (infer bila perlu), lalu gate — pesan error tidak membocorkan daftar role.
+  // Tahap 1 (resolve, infer bila perlu) + 2 (enforce role) — pesan error tidak
+  // membocorkan daftar role. Tahap 3–5 di chatWithAI, tahap 6 (persist + audit) di bawah.
   const resolved = resolveAssistant({ assistantId, role: user.role, message });
   if (!canUseAssistant(user.role, resolved.id)) {
     return res.status(403).json({ error: `assistant '${resolved.id}' is not available for role '${user.role}'` });
   }
+  // Konteks space opsional: ditolak tegas (403) bila tak boleh lihat, bukan diam-diam.
+  let spaceContext: Awaited<ReturnType<typeof requireSpaceContext>> | null = null;
+  if (spaceId) {
+    try {
+      spaceContext = await requireSpaceContext(spaceId, { id: user.id, role: user.role });
+    } catch (e) {
+      const status = typeof (e as { status?: unknown })?.status === 'number' ? ((e as { status: number }).status as number) : 500;
+      const msg = e instanceof Error ? e.message : 'space context unavailable';
+      return res.status(status === 503 ? 503 : 403).json({ error: msg });
+    }
+  }
   let result: Awaited<ReturnType<typeof chatWithAI>>;
   try {
-    result = await chatWithAI(message, { assistantId: resolved.id, role: user.role, sessionId });
+    result = await chatWithAI(message, { assistantId: resolved.id, role: user.role, userId: user.id, sessionId, spaceContext });
   } catch (e) {
     // Gagal grounding (mis. DB mati) → 503 eksplisit, tanpa jawaban karangan.
     const status = typeof (e as { status?: unknown })?.status === 'number' ? ((e as { status: number }).status as number) : 500;
@@ -56,8 +71,27 @@ r.post('/', requireAuth, chatLimiter, async (req, res) => {
   res.setHeader('X-Data-Via', result.dataVia);
   if (result.assistantId) res.setHeader('X-Assistant', result.assistantId);
   // Audit tanpa blokir respons; hanya preview, bukan isi penuh.
-  void auditChat({ user, assistantId: result.assistantId ?? resolved.id, message, via: result.via });
-  // Persist thread: lanjutkan bila id valid milik user, else buka baru. Gagal DB → tetap balas.
+  void auditChat({ user, assistantId: result.assistantId ?? resolved.id, message, via: result.via, spaceId: spaceContext?.spaceId });
+  if (spaceContext) {
+    void logSpaceActivity({
+      spaceId: spaceContext.spaceId, actorId: user.id, actorRole: user.role,
+      type: 'CONTEXT_USED', summary: `Chat used space "${spaceContext.name}" as context`,
+    });
+  }
+  // Saran simpan ke space (deterministik per domain; hanya bila user punya space yang bisa ditulis).
+  // Tidak disarankan bila chat sudah memakai space itu sebagai konteks.
+  let suggestedSpace: Awaited<ReturnType<typeof suggestSpace>> = null;
+  try {
+    const s = await suggestSpace({
+      viewer: { id: user.id, role: user.role },
+      message,
+      tenderIds: result.tenderIds ?? [],
+    });
+    if (s && s.spaceId !== (spaceContext?.spaceId ?? null)) suggestedSpace = s;
+  } catch {
+    suggestedSpace = null;
+  }
+  // Tahap 6 (persist + audit): lanjutkan thread bila id valid milik user, else buka baru. Gagal DB → tetap balas.
   let cid: string | undefined = conversationId;
   if (cid) {
     const ok = await appendExchange({ conversationId: cid, userId: user.id, role: user.role, question: message, answer: result });
@@ -67,7 +101,7 @@ r.post('/', requireAuth, chatLimiter, async (req, res) => {
     cid = (await openConversation({ userId: user.id, assistantId: result.assistantId ?? resolved.id, title: message })) ?? undefined;
     if (cid) await appendExchange({ conversationId: cid, userId: user.id, role: user.role, question: message, answer: result });
   }
-  res.json({ ...result, conversationId: cid ?? null });
+  res.json({ ...result, conversationId: cid ?? null, spaceId: spaceContext?.spaceId ?? null, suggestedSpace });
 });
 
 // GET /api/chat/assistants — hanya assistant yang boleh dipakai role user.

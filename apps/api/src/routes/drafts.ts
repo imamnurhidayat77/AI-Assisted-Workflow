@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { emitDraftChanged } from '../realtime.js';
-import { canApproveDraft, isDraftStatus } from '@street-smart/shared';
+import { canApproveDraft, isDraftStatus, type RoleId } from '@street-smart/shared';
 import { createDraft, editDraft, getDraft, listAllDrafts, listDrafts, setDraftStatus } from '../services/drafts.js';
 import { requireAuth, type AuthUser } from '../services/auth.js';
+import { canViewSpace } from '../services/spaceAccess.js';
+import { logSpaceActivity } from '../services/spaceContext.js';
 
 /** Sinkronisasi balik draft → quotation (rantai approval utuh):
  * approve → quotation approved; reject → quotation sent kembali draft.
@@ -85,13 +87,17 @@ function sendErr(res: { status: (c: number) => { json: (b: unknown) => void } },
 // Semua route drafts wajib auth (isi draft bisa sensitif — jawaban finance/HR).
 // List/detail/edit mengikuti kepemilikan (management: semua); decidedBy dari sesi.
 r.get('/', requireAuth, async (req, res) => {
-  const all = await listDrafts(viewerOf(res));
-  const q = req.query.status;
-  if (typeof q === 'string' && q) {
-    if (!isDraftStatus(q)) return res.status(400).json({ error: `unknown status: ${q.slice(0, 32)}` });
-    return res.json(all.filter((d) => d.status === q));
+  try {
+    const all = await listDrafts(viewerOf(res));
+    const q = req.query.status;
+    if (typeof q === 'string' && q) {
+      if (!isDraftStatus(q)) return res.status(400).json({ error: `unknown status: ${q.slice(0, 32)}` });
+      return res.json(all.filter((d) => d.status === q));
+    }
+    res.json(all);
+  } catch (e) {
+    sendErr(res, e);
   }
-  res.json(all);
 });
 
 // GET /api/drafts/inbox — antrean aksi untuk saya (bukan antrean global seperti /api/jobs):
@@ -117,15 +123,48 @@ r.get('/inbox', requireAuth, async (req, res) => {
 
 // GET /api/drafts/:id
 r.get('/:id', requireAuth, async (req, res) => {
-  const d = await getDraft(req.params.id);
-  if (!d || !canSee(d, viewerOf(res))) return res.status(404).json({ error: 'not found' });
-  res.json(d);
+  try {
+    const d = await getDraft(req.params.id);
+    if (!d || !canSee(d, viewerOf(res))) return res.status(404).json({ error: 'not found' });
+    res.json(d);
+  } catch (e) {
+    sendErr(res, e);
+  }
 });
 
-// POST /api/drafts — AI/human membuat draft baru (selalu status draft)
+// POST /api/drafts — AI/human membuat draft baru (selalu status draft).
+// spaceId opsional: harus space yang boleh dilihat pembuat (bukan tebakan buta).
 r.post('/', requireAuth, async (req, res) => {
   try {
-    const d = await createDraft({ ...(req.body ?? {}), createdBy: viewerOf(res).id });
+    const me = viewerOf(res);
+    const rawSpace = typeof req.body?.spaceId === 'string' && req.body.spaceId ? req.body.spaceId.slice(0, 64) : undefined;
+    let spaceId: string | undefined;
+    if (rawSpace) {
+      const prisma = new PrismaClient();
+      try {
+        const s = await prisma.space.findUnique({ where: { id: rawSpace } });
+        if (!s || !canViewSpace({ id: me.id, role: me.role as RoleId }, {
+          ...s,
+          ownerId: s.ownerId,
+          ownerRole: s.ownerRole,
+          visibility: s.visibility as 'PRIVATE' | 'ROLE',
+          status: s.status as 'ACTIVE' | 'ARCHIVED',
+        })) {
+          await prisma.$disconnect().catch(() => {});
+          return res.status(404).json({ error: 'space not found' });
+        }
+      } finally {
+        await prisma.$disconnect().catch(() => {});
+      }
+      spaceId = rawSpace;
+    }
+    const d = await createDraft({ ...(req.body ?? {}), createdBy: me.id, spaceId });
+    if (spaceId) {
+      await logSpaceActivity({
+        spaceId, actorId: me.id, actorRole: me.role,
+        type: 'DRAFT_CREATED', summary: `Draft created: ${d.title}`.slice(0, 280), refId: d.id,
+      });
+    }
     emitDraftChanged(d);
     res.status(201).json(d);
   } catch (e) {
@@ -167,6 +206,12 @@ r.post('/:id/approve', requireAuth, async (req, res) => {
     if (!(await mustDecide(req, res))) return;
     const d = await setDraftStatus(req.params.id, 'approved', actor(res));
     await syncQuotation(d, 'approved');
+    if (d.spaceId) {
+      await logSpaceActivity({
+        spaceId: d.spaceId, actorId: viewerOf(res).id, actorRole: viewerOf(res).role,
+        type: 'DRAFT_APPROVED', summary: `Draft approved: ${d.title}`.slice(0, 280), refId: d.id,
+      });
+    }
     emitDraftChanged(d);
     res.json({ ...d, quotationSynced: d.kind === 'quotation-review' && Boolean(d.sourceQuotationId) });
   } catch (e) {
@@ -196,6 +241,12 @@ r.post('/:id/reject', requireAuth, async (req, res) => {
     }
     const decided = await setDraftStatus(req.params.id, 'rejected', actor(res));
     await syncQuotation(decided, 'rejected');
+    if (decided.spaceId) {
+      await logSpaceActivity({
+        spaceId: decided.spaceId, actorId: viewerOf(res).id, actorRole: viewerOf(res).role,
+        type: 'DRAFT_REJECTED', summary: `Draft rejected: ${decided.title}`.slice(0, 280), refId: decided.id,
+      });
+    }
     emitDraftChanged(decided);
     res.json(decided);
   } catch (e) {

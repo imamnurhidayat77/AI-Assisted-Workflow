@@ -5,9 +5,9 @@ import type { Draft, DraftHistoryEntry, DraftKind } from '@street-smart/shared';
 import { canEditDraftStatus, canMoveDraftStatus, isDraftKind } from '@street-smart/shared';
 
 /**
- * Penyimpanan Draft: Prisma/Postgres kalau reachable, fallback ke memori
- * (pola sama seperti DocumentStore supaya UI tidak pernah mati).
- * Bentuk API publik tetap sinkron-dari-luar (async) apa pun backend-nya.
+ * Penyimpanan Draft: tabel Postgres saja. DB mati → 503 eksplisit (PRD §13.3),
+ * tanpa fallback memori dan tanpa data palsu.
+ * Bentuk API publik tetap async apa pun backend-nya.
  */
 
 type Row = {
@@ -23,6 +23,7 @@ type Row = {
   sourceDocumentId: string | null;
   sourceDocumentName: string | null;
   sourceQuotationId: string | null;
+  spaceId: string | null;
   decidedBy: string | null;
   decidedAt: Date | null;
   createdBy: string | null;
@@ -57,6 +58,7 @@ function toDraft(r: Row): Draft {
     tenderIds: asStrings(r.tenderIds),
     sourceDocumentId: r.sourceDocumentId ?? undefined,
     sourceQuotationId: r.sourceQuotationId ?? undefined,
+    spaceId: r.spaceId ?? undefined,
     sourceDocumentName: r.sourceDocumentName ?? undefined,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
@@ -139,6 +141,7 @@ class DraftStore {
         typeof input.sourceDocumentName === 'string' ? input.sourceDocumentName.slice(0, 200) : undefined,
       sourceQuotationId:
         typeof input.sourceQuotationId === 'string' ? input.sourceQuotationId.slice(0, 64) : undefined,
+      spaceId: typeof input.spaceId === 'string' && input.spaceId ? input.spaceId.slice(0, 64) : undefined,
       createdAt: now,
       updatedAt: now,
       createdBy,
@@ -158,6 +161,7 @@ class DraftStore {
         tenderIds: base.tenderIds ?? [],
         sourceDocumentId: base.sourceDocumentId,
         sourceQuotationId: base.sourceQuotationId ?? null,
+        spaceId: base.spaceId ?? null,
         sourceDocumentName: base.sourceDocumentName,
         history: asJson(base.history),
       },
@@ -228,6 +232,7 @@ export interface CreateDraftInput {
   sourceDocumentId?: unknown;
   sourceDocumentName?: unknown;
   sourceQuotationId?: unknown;
+  spaceId?: unknown;
 }
 
 export const listDrafts = (viewer?: { id: string; role: string }) => store.list(viewer);

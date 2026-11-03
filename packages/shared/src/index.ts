@@ -563,6 +563,8 @@ export interface Draft {
   /** Tautan balik ke quotation (diisi saat request approval dari /quotations) —
    * approve draft → quotation approved; reject → quotation kembali draft. */
   sourceQuotationId?: string;
+  /** Tautan balik ke space (diisi saat draft dibuat dengan space aktif). */
+  spaceId?: string;
   createdAt: string;
   updatedAt: string;
   decidedBy?: string;

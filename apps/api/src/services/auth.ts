@@ -95,6 +95,7 @@ export async function auditChat(input: {
   assistantId: string;
   message: string;
   via: string;
+  spaceId?: string;
 }): Promise<void> {
   try {
     const prisma = await db();
@@ -106,6 +107,7 @@ export async function auditChat(input: {
         assistantId: input.assistantId,
         messagePreview: input.message.slice(0, 200),
         via: input.via,
+        spaceId: input.spaceId,
       },
     });
   } catch (e) {

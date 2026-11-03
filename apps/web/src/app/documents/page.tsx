@@ -75,11 +75,11 @@ export default function DocumentsPage() {
       const res = await fetch(`${api.base}/api/documents/upload`, { method: 'POST', headers: authHeaders(), body: form });
       if (!res.ok) throw new Error(await res.text());
       const created = (await res.json()) as DocItem[];
-      toast(`${created.length} dokumen masuk antrean — ekstraksi berjalan`);
+      toast(`${created.length} documents queued — extraction running`);
       await load();
     } catch {
       // Upload gagal (API/DB mati): JANGAN tampilkan baris palsu — error eksplisit.
-      toast('Upload gagal — API/database tidak terjangkau. Periksa koneksi lalu coba lagi.');
+      toast('Upload failed — API/database unreachable. Check the connection and try again.');
     } finally {
       setUploading(false);
     }
@@ -97,7 +97,7 @@ export default function DocumentsPage() {
     } catch {
       setExtraction(null);
       // 422 (belum ada teks terparse) maupun API mati: katakan terus terang.
-      toast(`Ekstraksi ${doc.fileName} belum tersedia — tunggu status Processed atau upload ulang`);
+      toast(`Extraction for ${doc.fileName} is not ready — wait for Processed status or re-upload`);
     }
   };
 
@@ -109,7 +109,7 @@ export default function DocumentsPage() {
       await load();
       toast(`${doc.fileName} deleted`);
     } catch {
-      toast(`Gagal menghapus ${doc.fileName} — API/database tidak terjangkau`);
+      toast(`Could not delete ${doc.fileName} — API/database unreachable`);
     }
   };
 
@@ -150,7 +150,7 @@ export default function DocumentsPage() {
   const needsReview = extraction ? extractionNeedsReview(extraction) : false;
 
   return <Shell title="Document ingestion">
-    <div className="content-page page-scroll"><PageHeader title="Document ingestion" subtitle="Upload and process business documents for AI-powered search and analysis." />
+    <div className="content-page page-scroll"><PageHeader title="Document ingestion" subtitle="Copilot knowledge — upload and process documents for grounded search and analysis." />
       <div className="document-layout">
         <div className="table-card upload-card">
           <label className="drop-zone" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); uploadFiles(e.dataTransfer.files); }}>
@@ -168,7 +168,7 @@ export default function DocumentsPage() {
               </select>
             </div>
           </label>
-          <div className="queue-header"><div><div className="table-title">Processing queue</div><div className="table-subtitle">{loadError ? 'Database tidak terjangkau — tidak ada data palsu yang ditampilkan' : `${docs.length} files · stored in database`}</div></div></div>
+          <div className="queue-header"><div><div className="table-title">Processing queue</div><div className="table-subtitle">{loadError ? 'Database unreachable — no placeholder data shown' : `${docs.length} files · stored in database`}</div></div></div>
           <div className="file-list">{docs.map((d) => <div className="file-row" key={d.id}>
             <div className="file-icon"><Icon name="file" /></div>
             <div className="file-main"><div className="file-name">{d.fileName}</div><div className="file-meta">{d.sizeLabel} · {new Date(d.createdAt).toLocaleDateString()}</div>{d.status === 'Processing' && <div className="file-progress"><i /></div>}</div>

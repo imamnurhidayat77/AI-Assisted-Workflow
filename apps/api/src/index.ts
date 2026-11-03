@@ -34,6 +34,14 @@ const allowedOrigins = (process.env.CORS_ORIGINS ?? process.env.WEB_URL ?? 'http
   .filter(Boolean);
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json({ limit: '2mb' }));
+// Header keamanan minimal (tanpa dep) + sembunyikan fingerprint Express.
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 
 app.get('/health', (_req, res) => {
   // embeddingInfo sync (tanpa load model) — aman dipanggil tiap health check.
@@ -75,6 +83,23 @@ app.post('/api/chat-legacy', requireAuth, async (req, res) => {
     res.status(status).json({ error: e instanceof Error ? e.message : 'chat unavailable' });
   }
 });
+
+// Produksi menolak boot bila kredensial demo masih aktif — ganti SSO/password
+// per-user dulu (lihat docs/04 §8). Dev (tanpa NODE_ENV=production) tidak terpengaruh.
+if ((process.env.NODE_ENV ?? '').toLowerCase() === 'production') {
+  const problems: string[] = [];
+  if ((process.env.ALLOW_DEMO_LOGIN ?? 'true').toLowerCase() !== 'false') {
+    problems.push('ALLOW_DEMO_LOGIN must be "false"');
+  }
+  if (!process.env.DUMMY_PASSWORD) problems.push('DUMMY_PASSWORD must be set (or SSO in place)');
+  if (!process.env.DATABASE_URL || /localhost|streetsmart/.test(process.env.DATABASE_URL)) {
+    problems.push('DATABASE_URL must point to Neon, not local docker');
+  }
+  if (problems.length) {
+    console.error(`[api] refusing to boot in production:\n - ${problems.join('\n - ')}`);
+    process.exit(1);
+  }
+}
 
 const port = Number(process.env.API_PORT ?? 4000);
 const httpServer = createServer(app);

@@ -35,10 +35,15 @@ function canSee(createdBy: string | null, viewer: { id: string; role: string }):
   return viewer.role === 'management' || !createdBy || createdBy === viewer.id;
 }
 
-/** Daftar thread milik user (management: semua). Null bila DB mati (caller pakai fallback). */
+function dbError(e: unknown): never {
+  if (e && typeof (e as { status?: unknown }).status === 'number') throw e;
+  throw Object.assign(new Error('database unreachable'), { status: 503 });
+}
+
+/** Daftar thread milik user (management: semua). DB mati → 503 (tanpa riwayat palsu). */
 export async function listConversations(viewer: { id: string; role: string }): Promise<ThreadSummary[] | null> {
   const prisma = await db();
-  if (!prisma) return null;
+  if (!prisma) throw Object.assign(new Error('database unreachable'), { status: 503 });
   try {
     const rows = await prisma.conversation.findMany({ orderBy: { updatedAt: 'desc' }, take: 100 });
     return rows
@@ -50,15 +55,15 @@ export async function listConversations(viewer: { id: string; role: string }): P
         assistantId: r.assistantId ?? undefined,
         updatedAt: r.updatedAt.toISOString(),
       }));
-  } catch {
-    return null;
+  } catch (e) {
+    dbError(e);
   }
 }
 
-/** Isi thread (owner/management). Null bila tidak ada / bukan pemilik / DB mati. */
+/** Isi thread (owner/management). Null bila tidak ada / bukan pemilik; DB mati → 503. */
 export async function getThread(id: string, viewer: { id: string; role: string }): Promise<{ summary: ThreadSummary; messages: ThreadMessage[] } | null> {
   const prisma = await db();
-  if (!prisma) return null;
+  if (!prisma) throw Object.assign(new Error('database unreachable'), { status: 503 });
   try {
     const row = await prisma.conversation.findUnique({
       where: { id },
@@ -75,8 +80,8 @@ export async function getThread(id: string, viewer: { id: string; role: string }
       },
       messages: row.messages.map((m) => ({ id: m.id, role: m.role, content: m.content, createdAt: m.createdAt.toISOString() })),
     };
-  } catch {
-    return null;
+  } catch (e) {
+    dbError(e);
   }
 }
 

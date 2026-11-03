@@ -1,0 +1,53 @@
+{
+  "date": "2026-11-03T11:23:31.747Z",
+  "mode": "mock",
+  "passed": 9,
+  "total": 9,
+  "checks": [
+    {
+      "name": "A: sales mendapat prioritas tender live",
+      "pass": true,
+      "detail": "assistant=sales-assistant, via=db"
+    },
+    {
+      "name": "A: finance melihat overdue agregat (tanpa kartu tender)",
+      "pass": true,
+      "detail": "assistant=finance-assistant, via=db"
+    },
+    {
+      "name": "A: hr menjawab dari roster live (kolom headcount)",
+      "pass": true,
+      "detail": "assistant=hr-assistant, via=db"
+    },
+    {
+      "name": "A: ops melihat status jobs live",
+      "pass": true,
+      "detail": "assistant=ops-assistant, via=db"
+    },
+    {
+      "name": "A: management dapat ringkasan lintas-domain",
+      "pass": true,
+      "detail": "assistant=management-assistant, via=db"
+    },
+    {
+      "name": "A: sales tanya distributor NZ vs AU",
+      "pass": true,
+      "detail": "assistant=sales-assistant, via=db"
+    },
+    {
+      "name": "A: sapaan dijawab singkat tanpa kartu/tombol",
+      "pass": true,
+      "detail": "assistant=sales-assistant, via=db"
+    },
+    {
+      "name": "B: cross-role assistant ditolak, own-role lolos",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "C: jawaban sales tidak membocorkan ID invoice",
+      "pass": true,
+      "detail": "assistant=sales-assistant, inv=0"
+    }
+  ]
+}

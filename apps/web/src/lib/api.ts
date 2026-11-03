@@ -37,6 +37,9 @@ function notify(res: Response): void {
   }
 }
 
+/** GET dengan fallback. shortcut: error HTTP (termasuk 503 DB mati) ikut
+ * ditelan jadi fallback — halaman menampilkan empty state, bukan pesan error
+ * eksplisit. Upgrade: lempar {status} agar halaman bedakan "kosong" vs "error". */
 async function get<T>(path: string, fallback: T): Promise<T> {
   try {
     const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store', headers: headers() });

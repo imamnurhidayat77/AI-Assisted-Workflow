@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { distributorSales as mockSales, type DistributorSale } from '@street-smart/shared';
+import type { DistributorSale } from '@street-smart/shared';
 
 let client: PrismaClient | null = null;
 
@@ -18,18 +18,19 @@ async function db(): Promise<PrismaClient | null> {
 
 export interface SalesSnapshot {
   rows: DistributorSale[];
-  via: 'db' | 'mock';
+  via: 'db';
 }
 
-/** Distributor sales from Postgres; mock fallback when DB is unreachable/empty. */
+/** Distributor sales from Postgres. Tanpa fallback mock: DB mati → 503 eksplisit.
+ * Tabel kosong = kondisi legit (bukan error) — caller menampilkan empty state. */
 export async function getSalesSnapshot(): Promise<SalesSnapshot> {
   const prisma = await db();
-  if (!prisma) return { rows: mockSales, via: 'mock' };
+  if (!prisma) throw Object.assign(new Error('database unreachable'), { status: 503 });
   try {
     const found = await prisma.distributorSale.findMany({ orderBy: [{ quarter: 'asc' }, { country: 'asc' }] });
-    if (!found.length) return { rows: mockSales, via: 'mock' };
     return { rows: found.map((r) => ({ ...r })), via: 'db' };
-  } catch {
-    return { rows: mockSales, via: 'mock' };
+  } catch (e) {
+    if (e && typeof (e as { status?: unknown }).status === 'number') throw e;
+    throw Object.assign(new Error('database query failed'), { status: 503 });
   }
 }

@@ -8,3 +8,10 @@ apps/api/uploads/*
 *.log
 .DS_Store
 .neon
+
+# AI agent skills — local tooling only, never push (code saja yang di-push)
+.agents/
+.claude/
+agent/
+.opencode/skills/
+skills-lock.json

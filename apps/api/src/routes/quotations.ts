@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type QuotationStatus } from '@prisma/client';
 import { requireAuth, type AuthUser } from '../services/auth.js';
 
 const r = Router();
@@ -102,7 +102,7 @@ r.patch('/:id', requireAuth, async (req, res) => {
       await prisma.$disconnect().catch(() => {});
       return res.status(409).json({ error: 'quotation is under review — wait for the decision' });
     }
-    const patch: { title?: string; partner?: string; amountCents?: number; tenderId?: string | null; validUntil?: Date | null; status?: string } = {};
+    const patch: { title?: string; partner?: string; amountCents?: number; tenderId?: string | null; validUntil?: Date | null; status?: QuotationStatus } = {};
     if (typeof req.body?.title === 'string' && req.body.title.trim()) patch.title = req.body.title.trim().slice(0, 200);
     if (typeof req.body?.partner === 'string' && req.body.partner.trim()) patch.partner = req.body.partner.trim().slice(0, 200);
     if (req.body?.amountCents !== undefined) {
@@ -126,7 +126,7 @@ r.patch('/:id', requireAuth, async (req, res) => {
       }
     }
     // Status final (approved/rejected) hanya lewat draft approval — di sini cuma draft/sent/expired.
-    if (typeof req.body?.status === 'string' && ['draft', 'sent', 'expired'].includes(req.body.status)) {
+    if (req.body?.status === 'draft' || req.body?.status === 'sent' || req.body?.status === 'expired') {
       patch.status = req.body.status;
     }
     const row = await prisma.quotation.update({ where: { id: req.params.id }, data: patch });

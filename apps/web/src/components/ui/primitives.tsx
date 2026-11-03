@@ -78,7 +78,7 @@ export function Status({ children, tone = 'blue' }: { children: ReactNode; tone?
 }
 
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }) {
-  return <div className="page-header"><div><div className="eyebrow">Street Smart Cockpit</div><div className="page-title">{title}</div><div className="page-subtitle">{subtitle}</div></div>{action}</div>;
+  return <div className="page-header"><div><div className="eyebrow">Street Smart Copilot</div><div className="page-title">{title}</div><div className="page-subtitle">{subtitle}</div></div>{action}</div>;
 }
 
 export function Composer({ value, setValue, onSend, compact = false, mentionOptions, mentionValue, onMention }: {

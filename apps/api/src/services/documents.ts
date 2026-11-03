@@ -33,8 +33,8 @@ function dbError(e: unknown): never {
 }
 
 /**
- * Penyimpanan dokumen: Prisma/Postgres kalau reachable,
- * fallback ke memori (seed sama) supaya UI tidak pernah mati.
+ * Penyimpanan dokumen: Prisma/Postgres saja. DB mati → 503 eksplisit (PRD §13.3),
+ * tanpa fallback memori dan tanpa data palsu.
  */
 class DocumentStore {
   private prisma: PrismaClient | null = null;

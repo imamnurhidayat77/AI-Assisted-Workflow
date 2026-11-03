@@ -1,4 +1,4 @@
-# Requirements Brief — Street Smart Cockpit
+# Requirements Brief — Street Smart Copilot
 
 **Project:** Business Optimization — AI-assisted data management & business process platform
 **Organisation:** Smart City Street Ltd, NZ
@@ -16,7 +16,7 @@ New Zealand, Australia, and other markets. Information is scattered across PDFs,
 spreadsheets, and disconnected records, making it hard to search, compare, and report.
 
 This project builds a **working full-stack prototype** of a data management and
-business process platform with an SAP Joule-style AI copilot ("Street Smart Cockpit"),
+business process platform with an SAP Joule-style AI copilot ("Street Smart Copilot"),
 and explores how modern AI tools improve information handling: extracting and
 structuring information from documents, easier search, useful reports, and automation
 of selected routine tasks.
@@ -83,8 +83,8 @@ of selected routine tasks.
 | NFR-02 | Extraction accuracy | ≥ 90% field accuracy on a 20-document ground-truth set |
 | NFR-03 | No hallucinated records | 0 invented tender IDs in chat responses (automated check) |
 | NFR-04 | Responsiveness | Chat mock latency ~600 ms; pages build as static where possible |
-| NFR-05 | Graceful degradation | API works with DB down (mock fallback); UI works with API down (local fallback) |
-| NFR-06 | Local reproducibility | Fresh clone → running (mock mode) with `npm install` + 2 commands, no external keys |
+| NFR-05 | Fail clearly (PRD §7/§9.2/§13.3) | DB/API down → explicit error/empty state, never fabricated data. Mock only as labeled demo mode (env-gated, UI badge) |
+| NFR-06 | Local reproducibility | Fresh clone → running (seeded synthetic data) with `npm install` + 2 commands, no external keys |
 
 ## 6. Acceptance Criteria (demo script)
 

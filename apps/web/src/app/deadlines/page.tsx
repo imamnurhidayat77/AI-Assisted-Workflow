@@ -45,8 +45,8 @@ export default function DeadlinesPage() {
   if (rows === null) {
     return <Shell title="Deadlines"><div className="content-page page-scroll">
       <PageHeader title="Deadlines" subtitle="Tender closing timeline." />
-      <div className="dataset"><div className="table-title">Database tidak terjangkau</div>
-        <div className="table-subtitle">Tidak ada angka palsu yang ditampilkan. Periksa koneksi API lalu muat ulang.</div>
+      <div className="dataset"><div className="table-title">Database unreachable</div>
+        <div className="table-subtitle">No placeholder figures shown. Check the API connection, then reload.</div>
         <div className="action-row"><Button variant="primary" onClick={() => { load(); toast('Retrying…'); }}>Retry</Button></div></div>
     </div></Shell>;
   }
@@ -62,7 +62,7 @@ export default function DeadlinesPage() {
 
   return <Shell title="Deadlines">
     <div className="content-page page-scroll">
-      <PageHeader title="Deadlines" subtitle="Tender closing timeline — earliest first, live from the pipeline." />
+      <PageHeader title="Deadlines" subtitle="Copilot-tracked tender closing timeline — earliest first, live from the pipeline." />
       {GROUPS.map((g) => {
         const list = withDays.filter((r) => groupOf(r.days) === g);
         if (!list.length) return null;

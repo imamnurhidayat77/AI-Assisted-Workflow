@@ -36,8 +36,8 @@ export default function HrPage() {
   if (data === null) {
     return <Shell title="HR overview"><div className="content-page page-scroll">
       <PageHeader title="HR overview" subtitle="Policies and aggregate team capacity." />
-      <div className="dataset"><div className="table-title">Database tidak terjangkau</div>
-        <div className="table-subtitle">Tidak ada angka palsu yang ditampilkan. Periksa koneksi API lalu muat ulang.</div>
+      <div className="dataset"><div className="table-title">Database unreachable</div>
+        <div className="table-subtitle">No placeholder figures shown. Check the API connection, then reload.</div>
         <div className="action-row"><Button variant="primary" onClick={() => { load(); toast('Retrying…'); }}>Retry</Button></div></div>
     </div></Shell>;
   }

@@ -40,7 +40,7 @@ export default function ConversationsPage() {
   }, []);
 
   return <Shell title="Conversations">
-    <div className="content-page page-scroll"><PageHeader title="Conversations" subtitle={failed ? 'Database tidak terjangkau — tidak ada riwayat palsu yang ditampilkan.' : 'Continue recent work with Street Smart AI.'} action={<Button icon="plus" variant="primary" onClick={() => router.push('/conversation?new=1')}>New conversation</Button>} />
+    <div className="content-page page-scroll"><PageHeader title="Conversations" subtitle={failed ? 'Database unreachable — no placeholder history shown.' : 'Your copilot threads — continue recent work.'} action={<Button icon="plus" variant="primary" onClick={() => router.push('/conversation?new=1')}>New conversation</Button>} />
       <div className="conversation-list">{rows.length === 0 && !failed
         ? <div className="table-subtitle">No conversations yet — start a new one.</div>
         : rows.map((c, i) =>

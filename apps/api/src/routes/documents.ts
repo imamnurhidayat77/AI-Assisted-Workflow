@@ -129,7 +129,7 @@ r.get('/:id/extract', requireAuth, async (req, res) => {
           fields: [
             { label: 'Characters parsed', value: textLen.toLocaleString(), confidence: 1, source: 'extracted', needsReview: false },
             { label: 'Chunks indexed', value: String(chunkCount), confidence: 1, source: 'extracted', needsReview: false },
-            { label: 'Embedding', value: 'hashing deterministik · 384d (siap ganti model)', confidence: 1, source: 'extracted', needsReview: false },
+            { label: 'Embedding', value: 'deterministic hashing · 384d (swappable model)', confidence: 1, source: 'extracted', needsReview: false },
             { label: 'Preview', value: preview ? `${preview}…` : '—', confidence: 0.9, source: 'extracted', needsReview: false },
           ],
           missingFields: [],

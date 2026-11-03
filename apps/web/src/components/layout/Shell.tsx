@@ -30,6 +30,7 @@ export const navGroups: { label: string; items: NavItem[] }[] = [
   ] },
   { label: 'Operations', items: [
     { href: '/audits', label: 'Audit trail', icon: 'file', roles: ['management'] },
+    { href: '/metrics', label: 'Adoption metrics', icon: 'pulse', roles: ['management'] },
   ] },
 ];
 
@@ -90,7 +91,7 @@ export function Shell({ children, title }: { children: React.ReactNode; title: s
     <header className="topbar">
       <div className="brand">
         <Button icon="menu" variant="icon" className="mobile-menu" title="Open navigation" onClick={() => setMobileNav(!mobileNav)} />
-        <Link href="/" className="brand-button"><span className="brand-mark">S</span><span className="brand-words"><strong>Street Smart Cockpit</strong><small>AI BUSINESS OPERATIONS</small></span></Link>
+        <Link href="/" className="brand-button"><span className="brand-mark">S</span><span className="brand-words"><strong>Street Smart Copilot</strong><small>AI BUSINESS OPERATIONS</small></span></Link>
       </div>
       <div className="global-search"><Icon name="search" />
         <Input value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)}
@@ -103,7 +104,7 @@ export function Shell({ children, title }: { children: React.ReactNode; title: s
           <button className={theme === 'light' ? 'on' : ''} title="Light mode" onClick={() => switchTheme('light')}><Icon name="sun" size={14} /></button>
           <button className={theme === 'dark' ? 'on' : ''} title="Dark mode" onClick={() => switchTheme('dark')}><Icon name="moon" size={14} /></button>
         </div>
-        <div className="environment"><span /> Simulation</div>
+        <div className="environment"><span /> Seeded data</div>
         <div className="notification-wrap">
           <Button icon="bell" variant="icon" title={`Notifications${notices.length ? ` (${notices.length})` : ''}`} onClick={() => setNotifications(!notifications)} />
           {notices.length > 0 && <i className="notification-dot" />}

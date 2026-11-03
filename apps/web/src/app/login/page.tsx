@@ -74,7 +74,7 @@ export default function LoginPage() {
   return <div className="login-wrap">
     <div className="login-card">
       <div className="login-brand"><span className="brand-mark">S</span>
-        <div><strong>Street Smart Cockpit</strong><small>AI BUSINESS OPERATIONS</small></div>
+        <div><strong>Street Smart Copilot</strong><small>AI BUSINESS OPERATIONS</small></div>
       </div>
       <h1 className="login-title">Sign in</h1>
       <p className="login-muted">Pick a demo account by role. All passwords: <code>sss12345</code></p>
@@ -86,7 +86,7 @@ export default function LoginPage() {
         <label className="login-label">Password
           <div className="login-pw">
             <Input type={showPw ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="sss12345" autoComplete="current-password" />
-            <button type="button" className="login-eye" onClick={() => setShowPw(!showPw)} title={showPw ? 'Sembunyikan' : 'Tampilkan'}>
+            <button type="button" className="login-eye" onClick={() => setShowPw(!showPw)} title={showPw ? 'Hide' : 'Show'}>
               <Icon name="eye" size={16} />
             </button>
           </div>

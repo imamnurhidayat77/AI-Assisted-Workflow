@@ -110,7 +110,7 @@ export default function QuotationsPage() {
 
   return <Shell title="Quotations">
     <div className="content-page page-scroll">
-      <PageHeader title="Quotations" subtitle="Customer quotations — request approval to enter maker-checker." />
+      <PageHeader title="Quotations" subtitle="Copilot-assisted quotations — request approval to enter maker-checker." />
       <div className="table-card" style={{ marginBottom: 14 }}>
         <div className="table-toolbar"><div><div className="table-title">New quotation</div><div className="table-subtitle">Saved as draft — approval goes through My inbox</div></div></div>
         <div className="data-toolbar">

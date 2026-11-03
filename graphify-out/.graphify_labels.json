@@ -1,14 +1,9 @@
 {
-  "0": "api/package.json",
-  "1": "Shell",
-  "2": "ingest.ts",
   "4": "web/package.json",
   "5": "shared/src/index.ts",
   "6": "compilerOptions",
   "7": "scripts",
   "9": "compilerOptions",
-  "11": "db",
-  "12": "api/src/index.ts",
   "14": "shared/package.json",
   "16": "next-env.d.ts",
   "17": "postcss.config.mjs"

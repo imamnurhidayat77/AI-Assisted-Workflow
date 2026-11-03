@@ -47,8 +47,8 @@ export default function ExecutivePage() {
   if (tenders === null || finance === null) {
     return <Shell title="Executive overview"><div className="content-page page-scroll">
       <PageHeader title="Executive overview" subtitle="Cross-domain snapshot for decision makers." />
-      <div className="dataset"><div className="table-title">Database tidak terjangkau</div>
-        <div className="table-subtitle">Tidak ada angka palsu yang ditampilkan. Periksa koneksi API lalu muat ulang.</div>
+      <div className="dataset"><div className="table-title">Database unreachable</div>
+        <div className="table-subtitle">No placeholder figures shown. Check the API connection, then reload.</div>
         <div className="action-row"><Button variant="primary" onClick={() => { load(); toast('Retrying…'); }}>Retry</Button></div></div>
     </div></Shell>;
   }

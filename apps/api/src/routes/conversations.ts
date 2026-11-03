@@ -19,18 +19,23 @@ r.get('/', requireAuth, async (_req, res) => {
 
 // GET /api/conversations/:id — isi thread (owner/management). Pesan assistant
 // di-parse bila format JSON jawaban; bila tidak, dikirim sebagai teks biasa.
+// Tidak ketemu/bukan pemilik → 404; DB mati → 503.
 r.get('/:id', requireAuth, async (req, res) => {
   const user = (res as unknown as { locals: { user: AuthUser } }).locals.user;
-  const thread = await getThread(req.params.id, { id: user.id, role: user.role });
-  if (!thread) return res.status(404).json({ error: 'not found' });
-  res.json({
-    ...thread.summary,
-    messages: thread.messages.map((m) => {
-      if (m.role !== 'assistant') return m;
-      const parsed = parseAssistantContent(m.content);
-      return parsed ? { ...m, answer: parsed } : m;
-    }),
-  });
+  try {
+    const thread = await getThread(req.params.id, { id: user.id, role: user.role });
+    if (!thread) return res.status(404).json({ error: 'not found' });
+    res.json({
+      ...thread.summary,
+      messages: thread.messages.map((m) => {
+        if (m.role !== 'assistant') return m;
+        const parsed = parseAssistantContent(m.content);
+        return parsed ? { ...m, answer: parsed } : m;
+      }),
+    });
+  } catch {
+    res.status(503).json({ error: 'database unreachable' });
+  }
 });
 
 export default r;

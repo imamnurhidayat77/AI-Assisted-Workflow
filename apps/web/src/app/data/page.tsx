@@ -111,7 +111,7 @@ export default function DataPage() {
 
   const filtered = rows.filter((t) => `${t.name} ${t.agency} ${t.country}`.toLowerCase().includes(search.toLowerCase()));
   return <Shell title="Database explorer">
-    <div className="data-page"><PageHeader title="Database explorer" subtitle={`Browse indexed operational records and source datasets · ${loadError ? 'Database unreachable — no placeholder data shown' : 'Live database'}.`} action={canBrowseTenders ? <Button icon="download" onClick={() => toast('Tender dataset exported')}>Export</Button> : undefined} />
+    <div className="data-page"><PageHeader title="Database explorer" subtitle={`Copilot data access — browse indexed operational records and source datasets · ${loadError ? 'Database unreachable — no placeholder data shown' : 'Live database'}.`} action={canBrowseTenders ? <Button icon="download" onClick={() => toast('Tender dataset exported')}>Export</Button> : undefined} />
       <div className="dataset" style={{ marginBottom: 12 }}>
         <div className="dataset-header"><div><div className="table-title">Ask your data</div><div className="table-subtitle">Read-only Text-to-SQL over tables your role may access (allowlisted columns, max 50 rows).</div></div><Status tone="blue">Text-to-SQL</Status></div>
         <div className="data-toolbar"><div className="search-field"><Icon name="search" /><Input value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') askSql(); }} placeholder='e.g. how many overdue invoices? · how many tenders?' /></div><Button icon="spark" variant="primary" onClick={askSql}>{querying ? 'Running…' : 'Run query'}</Button></div>

@@ -4,7 +4,7 @@ import { AuthProvider } from '@/lib/auth';
 import { ToastProvider } from '@/lib/store';
 
 export const metadata: Metadata = {
-  title: 'Street Smart Cockpit — AI Business Operations',
+  title: 'Street Smart Copilot — AI Business Operations',
   description: 'SAP Joule-style AI copilot for Smart City Street Ltd NZ: tenders, sales, products, quotations.',
 };
 

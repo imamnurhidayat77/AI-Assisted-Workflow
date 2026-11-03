@@ -1,4 +1,4 @@
-# Test & Evaluation Plan — Street Smart Cockpit
+# Test & Evaluation Plan — Street Smart Copilot
 
 **Companion to:** `01-requirements-brief.md`, `02-system-design.md`
 **Status:** Living document — v1.0
@@ -29,7 +29,7 @@ testing & evaluation of usability and time saved (this doc + harness), technical
 | E3 | RAG grounding (FR-02/03) | T3–T5 harness: fixture CSV → chunk → top-1 retrieval = dokumen fixture → jawaban mensitasi + angka benar | T3–T5 PASS; uji regresi tiap ubah `embed()`/chunking |
 | E4 | Usability (NFR-01) | 3–5 partisipan (persona ops/management): 3 tugas — upload→extract, ask→answer, temukan tender; think-aloud, tanpa panduan | Semua tugas selesai tanpa training; catat titik gagal → backlog UX |
 | E5 | Time saved (Target Outcome) | Ukur baseline manual (stopwatch: cari tender di spreadsheet, rekap sales) vs AI-assisted untuk 3 workflow prioritas (triage tender, approval quotation, ringkasan sales) | Lapor Δ menit + % per workflow; target: ≥ 50% pada triage tender |
-| E6 | Responsiveness + graceful degradation (NFR-04/05) | Chat mock ~600 ms (ukur p95 20 request); matikan Postgres → chat+documents tetap jawab (fallback); matikan API → UI fallback lokal | p95 < 2 s mock; tidak ada error halaman kosong di kedua skenario |
+| E6 | Honest failure + responsiveness (PRD §9.2/§13.3) | DB down → API 503 + UI error/empty state (tegaskan: tidak ada data palsu); chat p95 < 2 s | Tidak ada konten fabrikasi di semua skenario; latensi dalam target |
 | E7 | Reproducibility (NFR-06) | Fresh clone → `npm install` + 2 perintah jalan mode mock, `npm run build` lolos web+api | Lolos di mesin kedua (catat Node/docker version) |
 | E8 | Draft decision integrity (FR-15/16) | Unit tests `drafts.transitions.test.ts` + `extract.test.ts`: state machine, edit-lock, anti-spoof `decidedBy`, sanitiser LLM | `npm run test --workspace=apps/api` 10/10 pass sebelum tiap milestone |
 

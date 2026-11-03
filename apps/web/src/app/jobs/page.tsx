@@ -62,7 +62,7 @@ export default function JobsPage() {
     await load();
     setActing(null);
     if (!updated) {
-      toast('Keputusan gagal disimpan — API/database tidak terjangkau. Tidak ada yang berubah.');
+      toast('Decision not saved — API/database unreachable. Nothing changed.');
       return;
     }
     toast(action === 'approve' ? `Draft approved — recorded under ${updated.decidedBy ?? sessionUser?.name ?? 'you'}` : 'Draft rejected — reopen it from the draft flow');
@@ -81,9 +81,9 @@ export default function JobsPage() {
   }
 
   return <Shell title="Jobs">
-    <div className="content-page page-scroll"><PageHeader title="Jobs & automations" subtitle="AI agents working across your operational workflows." action={<Button icon="plus" variant="primary" onClick={() => toast('Job builder opened')}>Create job</Button>} />
+    <div className="content-page page-scroll"><PageHeader title="Jobs & automations" subtitle="Copilot automations working across your operational workflows." action={<Button icon="plus" variant="primary" onClick={() => toast('Job builder opened')}>Create job</Button>} />
       <div className="summary-row"><div className="summary-card"><span>Active jobs</span><strong>{active}</strong><small>Across agents</small></div><div className="summary-card"><span>Decided drafts</span><strong>{history.length}</strong><small>Audit permanen</small></div><div className="summary-card"><span>Awaiting review</span><strong>{awaiting}</strong><small>Human approval required</small></div></div>
-      <div className="table-card"><div className="table-toolbar"><div><div className="table-title">All jobs</div><div className="table-subtitle">{loadError ? 'Database tidak terjangkau — tidak ada job palsu yang ditampilkan' : `Live queue — drafts awaiting your decision on top${liveFeed ? ' · realtime on' : ''}`}</div></div><div className="table-subtitle">Signed in as {sessionUser ? `${sessionUser.name} (${sessionUser.role})` : '…'} — decisions are recorded under this name.</div><div className="toolbar-actions"><Button icon="filter">Filter</Button><Button icon="refresh" onClick={async () => { await load(); toast('Job statuses refreshed'); }}>Refresh</Button></div></div>
+      <div className="table-card"><div className="table-toolbar"><div><div className="table-title">All jobs</div><div className="table-subtitle">{loadError ? 'Database unreachable — no placeholder jobs shown' : `Live queue — drafts awaiting your decision on top${liveFeed ? ' · realtime on' : ''}`}</div></div><div className="table-subtitle">Signed in as {sessionUser ? `${sessionUser.name} (${sessionUser.role})` : '…'} — decisions are recorded under this name.</div><div className="toolbar-actions"><Button icon="filter">Filter</Button><Button icon="refresh" onClick={async () => { await load(); toast('Job statuses refreshed'); }}>Refresh</Button></div></div>
         <div className="job-list">{rows.length === 0 && !loadError ? <div className="table-subtitle">No jobs tracked yet.</div> : rows.map((job) => <div className="job-row" key={`${job.draftId ?? job.name}`}>
           <div className="job-main"><div className="job-icon"><Icon name={job.state === 'Completed' ? 'check' : job.state === 'Scheduled' ? 'calendar' : 'spark'} /></div><div><div className="job-name">{job.name}</div><div className="job-agent">{job.agent}{job.draftStatus ? ` · ${job.draftStatus}` : ''}</div></div></div>
           <div className="job-cell"><span>Trigger</span>{job.trigger}</div><div className="job-cell"><span>Last run</span>{job.lastRun}</div>

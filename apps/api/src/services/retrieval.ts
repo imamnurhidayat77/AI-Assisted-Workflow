@@ -14,7 +14,9 @@ const prisma = new PrismaClient();
 
 /**
  * Retrieval RAG: embed pertanyaan → cosine distance pgvector → top-k.
- * Mengembalikan [] bila DB tidak reachable / belum ada chunk (fallback aman).
+ * Mengembalikan [] bila belum ada chunk — itu empty state yang jujur
+ * (bukan data palsu); DB mati juga → [] agar chat tetap jawab dari data
+ * terstruktur + 503 eksplisit dari jalurnya sendiri.
  */
 export async function retrieveChunks(query: string, k = 4, maxDistance = 0.8): Promise<ChunkHit[]> {
   if (!process.env.DATABASE_URL) return [];

@@ -70,8 +70,8 @@ export default function ReportsPage() {
   if (rows === null) {
     return <Shell title="Tender reports"><div className="content-page page-scroll">
       <PageHeader title="Tender reports" subtitle="AI-generated analytics grounded in your tender pipeline." />
-      <div className="dataset"><div className="table-title">Database tidak terjangkau</div>
-        <div className="table-subtitle">Tidak ada angka palsu yang ditampilkan. Periksa koneksi API lalu muat ulang.</div>
+      <div className="dataset"><div className="table-title">Database unreachable</div>
+        <div className="table-subtitle">No placeholder figures shown. Check the API connection, then reload.</div>
         <div className="action-row"><Button variant="primary" onClick={() => { load(); toast('Retrying…'); }}>Retry</Button></div></div>
     </div></Shell>;
   }
@@ -126,7 +126,7 @@ export default function ReportsPage() {
   const topProduct = [...byProduct.entries()].sort((a, b) => b[1] - a[1])[0];
 
   return <Shell title="Tender reports">
-    <div className="content-page page-scroll"><PageHeader title="Tender reports" subtitle="Computed live from your pipeline and distributor sales — no sample data." action={<><Button icon="download" onClick={() => toast('Report exported as PDF')}>Export</Button></>} />
+    <div className="content-page page-scroll"><PageHeader title="Tender reports" subtitle="Copilot analytics computed live from your pipeline and distributor sales." action={<><Button icon="download" onClick={() => toast('Report exported as PDF')}>Export</Button></>} />
       <div className="action-row" role="group" aria-label="Report section" style={{ marginBottom: 14 }}>
         <div className="segmented">
           <button className={tab === 'tenders' ? 'on' : ''} onClick={() => setTab('tenders')}>Tenders</button>

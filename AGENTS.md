@@ -11,6 +11,11 @@ Perintah: `/ponytail lite|full|ultra`, `/ponytail-review`, `/ponytail-audit`, `/
 
 Yang tidak boleh dipotong: validasi, error handling anti data-loss, keamanan, aksesibilitas, dan yang user minta eksplisit.
 
+## Otoritas produk
+
+- Ikuti `docs/PRD.md` (v1.0, Owner: Imam Nurhidayat). Bila bertentangan dengan dokumen lain, PRD menang.
+- Perilaku default: **fail clearly** (PRD §7/§9.2/§13.3) — DB/API mati = 503 + empty/error state jujur, tanpa data fabrikasi. Mock hanya mode demo eksplisit (env-gated + badge UI).
+
 ## Bahasa
 
 - **UI wajib English semua** — semua string user-facing (halaman, tombol, toast, error, placeholder) dalam English. Jangan campur Indonesian di UI.

@@ -74,6 +74,50 @@ export interface SpaceItem {
   title: string;
   preview: string;
   createdAt: string;
+  /** Siapa menambah + kapan + catatan singkat (opsional, diisi server). */
+  addedById?: string;
+  addedAt?: string;
+  note?: string;
+}
+
+export type SpaceVisibility = 'PRIVATE' | 'ROLE';
+export type SpaceStatus = 'ACTIVE' | 'ARCHIVED';
+
+export interface SpaceActivity {
+  id: string;
+  type: string;
+  actorId: string;
+  actorRole: string;
+  refId?: string;
+  summary: string;
+  createdAt: string;
+}
+
+/** Aksi turunan data (bukan karangan) untuk halaman workspace. */
+export interface SpaceAction {
+  type: 'REVIEW_DRAFT' | 'FOLLOW_UP' | 'OPEN_ITEM';
+  title: string;
+  reason: string;
+  targetId?: string;
+  href: string;
+  requiresApproval: boolean;
+}
+
+/** Saran simpan ke space (deterministik, bukan tebakan LLM). */
+export interface SuggestedSpace {
+  spaceId: string;
+  name: string;
+  reason: string;
+}
+
+/** Preset pembuatan space — user tetap pemilik & pengatur isinya. */
+export interface SpaceTemplate {
+  id: string;
+  name: string;
+  purpose: string;
+  visibility: SpaceVisibility;
+  itemKinds: string[];
+  assistantId: string;
 }
 
 export interface SpaceSummary {
@@ -86,10 +130,51 @@ export interface SpaceSummary {
   updatedAt: string;
   itemCount: number;
   byKind: Record<string, number>;
+  /** Ownership & visibility (diisi server; legacy = undefined). */
+  ownerId?: string;
+  ownerRole?: string;
+  visibility?: SpaceVisibility;
+  status?: SpaceStatus;
+  /** Ringkasan turunan (diisi server bila tersedia). */
+  pendingActions?: number;
+  lastActivityAt?: string;
 }
 
 export interface SpaceDetail extends Omit<SpaceSummary, 'itemCount' | 'byKind'> {
   items: SpaceItem[];
+  activities?: SpaceActivity[];
+  drafts?: Draft[];
+}
+
+export const SPACE_TEMPLATES: SpaceTemplate[] = [
+  {
+    id: 'tpl-tender-review',
+    name: 'Tender Opportunity Review',
+    purpose: 'Review and prioritize active government tenders with linked briefs and deadlines.',
+    visibility: 'ROLE',
+    itemKinds: ['tender', 'conversation', 'document', 'note'],
+    assistantId: 'sales-assistant',
+  },
+  {
+    id: 'tpl-finance-close',
+    name: 'Monthly Finance Close',
+    purpose: 'Track invoices, accruals and closing checklist readiness for the current period.',
+    visibility: 'ROLE',
+    itemKinds: ['document', 'note', 'conversation'],
+    assistantId: 'finance-assistant',
+  },
+  {
+    id: 'tpl-distributor',
+    name: 'Distributor Performance',
+    purpose: 'Analyze sales by region, product, and quarter with import status.',
+    visibility: 'ROLE',
+    itemKinds: ['document', 'note', 'conversation'],
+    assistantId: 'sales-assistant',
+  },
+];
+
+export function isSpaceVisibility(v: unknown): v is SpaceVisibility {
+  return v === 'PRIVATE' || v === 'ROLE';
 }
 
 export interface ConversationItem {
@@ -148,6 +233,17 @@ export interface DistributorSale {
   currency: string;
 }
 
+/** Aksi kontekstual yang disarankan AI untuk jawaban ini (ala Joule):
+ * draft = buat draft kind tersebut; link = navigasi ke halaman app. */
+export interface SuggestedAction {
+  label: string;
+  kind: 'draft' | 'link';
+  draftKind?: DraftKind;
+  href?: string;
+}
+
+const ACTION_HREFS = ['/data', '/inbox', '/documents', '/jobs', '/quotations', '/deadlines', '/reports', '/finance', '/hr', '/spaces', '/executive'];
+
 export interface ChatResponse {
   answerTitle: string;
   answerCopy: string;
@@ -158,6 +254,26 @@ export interface ChatResponse {
   /** Filled by server: handling assistant + skills used (Joule-style). */
   assistantId?: string;
   skillsUsed?: string[];
+  /** Aksi kontekstual dari AI (disanitasi server). Kosong = tidak ada tombol. */
+  actions?: SuggestedAction[];
+}
+
+/** Sanitasi actions dari AI: whitelist kind/href, label pendek, maks 3. Pure. */
+export function sanitizeActions(input: unknown): SuggestedAction[] {
+  if (!Array.isArray(input)) return [];
+  const out: SuggestedAction[] = [];
+  for (const a of input) {
+    if (out.length >= 3) break;
+    if (typeof a !== 'object' || a === null) continue;
+    const o = a as { label?: unknown; kind?: unknown; draftKind?: unknown; href?: unknown };
+    if (typeof o.label !== 'string' || !o.label.trim()) continue;
+    if (o.kind === 'draft' && isDraftKind(o.draftKind)) {
+      out.push({ label: o.label.trim().slice(0, 48), kind: 'draft', draftKind: o.draftKind });
+    } else if (o.kind === 'link' && typeof o.href === 'string' && ACTION_HREFS.includes(o.href)) {
+      out.push({ label: o.label.trim().slice(0, 48), kind: 'link', href: o.href });
+    }
+  }
+  return out;
 }
 
 // --- Joule-style Assistant + Skill registry ---------------------------------
@@ -546,6 +662,27 @@ export interface DraftSection {
   footer?: boolean;
 }
 
+/** Serialize seksi kembali ke markdown template (invers parseDraftBody) — dipakai
+ * editor terstruktur agar hasil edit tetap dalam format baku. Pure. */
+export function serializeDraftBody(sections: DraftSection[]): string {
+  const out: string[] = [];
+  for (const s of sections) {
+    if (s.footer) {
+      out.push('---');
+      for (const p of s.paragraphs) out.push(p);
+      continue;
+    }
+    if (s.heading) out.push(`## ${s.heading}`);
+    for (const p of s.paragraphs) out.push(p);
+    for (const b of s.bullets) out.push(`- ${b}`);
+    if (s.table) {
+      out.push(`| ${s.table.head.join(' | ')} |`);
+      for (const r of s.table.rows) out.push(`| ${r.join(' | ')} |`);
+    }
+  }
+  return out.join('\n\n');
+}
+
 /** Parse body template (## heading, - bullet, | tabel |, --- footer) jadi seksi
  * terstruktur untuk kartu dokumen ala Joule. Pure, dipakai FE + tests. */
 export function parseDraftBody(body: string): DraftSection[] {
@@ -751,11 +888,11 @@ export const fallbackSpaces: SpaceSummary[] = [
 
 export const prompts: string[] = [
   'Which government tenders should we prioritize this month?',
-  'Summarize all open tenders closing in the next 30 days.',
+  'Show overdue invoices and what blocks month-end close.',
+  'How much leave is the team taking this week?',
   'Compare distributor sales in New Zealand and Australia.',
-  'Which Smartstud products have the highest sales growth?',
-  'Find quotations waiting for approval.',
-  'Prepare a tender opportunity brief for Auckland.',
+  'Which jobs or documents need attention right now?',
+  'Give me a cross-domain risk summary for this week.',
 ];
 
 export const tenders: Tender[] = [
@@ -968,8 +1105,28 @@ export function hrAnswer(pol: HrPolicy[], ros: LeaveRow[], viaLabel: string): Ch
   };
 }
 
+/** Sapaan / basa-basi pendek — dijawab singkat tanpa kartu, tabel, maupun tombol. */
+export function isGreeting(question: string): boolean {
+  const t = question.trim().toLowerCase();
+  return t.length > 0 && t.length <= 20 && /^(hi|hello|hey|hei|hai|halo|yo|pagi|siang|sore|malam|thanks|thank you|terima kasih|ok|oke|test)\b/.test(t);
+}
+
+export function greetingAnswer(assistantId?: string): ChatResponse {
+  return {
+    answerTitle: 'Hi there — how can I help?',
+    answerCopy: 'Ask me about tenders, invoices, leave, jobs, documents, or distributor sales — in your own words.',
+    tenderIds: [],
+    recommendation: '',
+    sources: [],
+    followUps: ['What can you help me with?', 'Show my pending items'],
+    assistantId,
+    skillsUsed: [],
+  };
+}
+
 export function mockChatAnswer(question: string, assistantId?: string): ChatResponse {
   const q = question.toLowerCase();
+  if (isGreeting(question)) return greetingAnswer(assistantId);
   const aid = assistantId ?? inferAssistantId(question);
   if (aid === 'finance-assistant') return financeAnswer(invoices, closeChecklist, 'simulated');
   if (aid === 'hr-assistant') return hrAnswer(hrPolicies, leaveRoster, 'simulated');

@@ -8,12 +8,13 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "lint": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test src/services/drafts.transitions.test.ts src/services/extract.test.ts src/services/sql.security.test.ts src/services/hardening.test.ts",
+    "test": "tsx --test src/services/drafts.transitions.test.ts src/services/extract.test.ts src/services/sql.security.test.ts src/services/hardening.test.ts src/services/skills.test.ts src/services/spaceAccess.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "seed": "tsx prisma/seed.ts",
     "eval": "tsx eval/run.ts",
+    "eval:answers": "tsx eval/score-answers.ts",
     "eval:extraction": "tsx eval/score-extraction.ts"
   },
   "dependencies": {

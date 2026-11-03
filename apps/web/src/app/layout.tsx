@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { AuthProvider } from '@/lib/auth';
 import { ToastProvider } from '@/lib/store';
 
 export const metadata: Metadata = {
@@ -10,5 +11,5 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return <html lang="en" suppressHydrationWarning><head>
     <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('street-smart-theme')||'dark';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();` }} />
-  </head><body><ToastProvider>{children}</ToastProvider></body></html>;
+  </head><body><ToastProvider><AuthProvider>{children}</AuthProvider></ToastProvider></body></html>;
 }

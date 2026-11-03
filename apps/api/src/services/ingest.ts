@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 import { toSql } from 'pgvector';
 import { embed } from './embeddings.js';
+import { isImageExt, ocrImageBuffer } from './ocr.js';
 
 const prisma = new PrismaClient();
 
@@ -35,7 +36,20 @@ export async function parseFile(absPath: string, ext: string): Promise<string> {
     const out: string[] = [];
     for (const name of wb.SheetNames.slice(0, 8)) {
       const sheet = wb.Sheets[name];
-      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true });
+      // Sel tanggal diformat kembali ("15 Dec 2026"), bukan serial Excel (46371)
+      // — bug nyata yang merusak sitasi RAG. Sel CSV tidak membawa format `z`,
+      // jadi deteksi via teks terformat `w` berpola tanggal (asumsi m/d/y ala SheetJS).
+      const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const fmtDateCell = (r: number, c: number, v: number): string | number => {
+        const cell = sheet[XLSX.utils.encode_cell({ r, c })] as { w?: unknown } | undefined;
+        const m = typeof cell?.w === 'string' ? cell.w.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/) : null;
+        if (!m) return v;
+        const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+        return `${Number(m[2])} ${MONTHS[Number(m[1]) - 1] ?? ''} ${year}`;
+      };
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true }).map((row, r) =>
+        (Array.isArray(row) ? row : [row]).map((c, ci) => (typeof c === 'number' ? fmtDateCell(r, ci, c) : c)),
+      );
       const lines = rows
         .map((r) => (Array.isArray(r) ? r : [r]).map((c) => String(c ?? '').trim()).filter(Boolean).join(' | '))
         .filter(Boolean)
@@ -43,6 +57,14 @@ export async function parseFile(absPath: string, ext: string): Promise<string> {
       if (lines.length) out.push(`[Sheet: ${name}]\n${lines.join('\n')}`);
     }
     return out.join('\n\n').trim();
+  }
+  if (isImageExt(ext)) {
+    try {
+      const buf = await fs.readFile(absPath);
+      return (await ocrImageBuffer(buf)) ?? '';
+    } catch {
+      return '';
+    }
   }
   if (ext === '.docx') {
     const mod = (await import('mammoth')) as unknown as { default?: { extractRawText: (o: { buffer: Buffer }) => Promise<{ value: string }> } };

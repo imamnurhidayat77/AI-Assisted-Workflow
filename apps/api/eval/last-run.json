@@ -1,8 +1,8 @@
 {
-  "date": "2026-11-01T17:38:21.361Z",
+  "date": "2026-11-01T23:04:36.890Z",
   "mode": "mock",
-  "passed": 6,
-  "total": 6,
+  "passed": 9,
+  "total": 9,
   "checks": [
     {
       "name": "T1 anti-halusinasi (0 ID asing dari 6 pertanyaan)",
@@ -10,9 +10,14 @@
       "detail": "asing: 0"
     },
     {
+      "name": "T1b finance tanpa ID invoice asing",
+      "pass": true,
+      "detail": "disebut: 2, asing: 0, dataVia=db"
+    },
+    {
       "name": "T2 documents API mengembalikan daftar",
       "pass": true,
-      "detail": "7 docs"
+      "detail": "4 docs"
     },
     {
       "name": "T3 ingest fixture menghasilkan chunk",
@@ -20,14 +25,24 @@
       "detail": "1 chunks"
     },
     {
+      "name": "T9 agregat sales DB sesuai narasi (NZ flat, AU ~+14%)",
+      "pass": true,
+      "detail": "NZ 2300→2300, AU +14.4%"
+    },
+    {
       "name": "T4 retrieval top-1 = dokumen fixture",
       "pass": true,
-      "detail": "Eval_Fixture_Cycleway.csv d=0.55"
+      "detail": "Eval_Fixture_Cycleway.csv d=0.58"
     },
     {
       "name": "T5 jawaban chat mensitasi fixture + menyebut 777",
       "pass": true,
       "detail": "via=mock"
+    },
+    {
+      "name": "T10 jawaban sales live: NZ + AU disebut, dataVia=db",
+      "pass": true,
+      "detail": "via=mock, dataVia=db"
     },
     {
       "name": "T6 cleanup fixture bersih",

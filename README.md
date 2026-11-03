@@ -7,48 +7,48 @@ Design awal dari Figma Make ada di `figma-make/` (referensi, jangan diedit).
 Implementasi production ada di monorepo ini:
 
 ```
-apps/web        Next.js 15 (App Router, TS, Tailwind v4) — UI Cockpit
-apps/api        Express TS — REST API (mock → Prisma/Postgres nanti)
-packages/shared Types + mock data yang dipakai web & api
+apps/web        Next.js 15 (App Router, TS, Tailwind v4) — UI Cockpit (tanpa data palsu: API mati = error/empty eksplisit)
+apps/api        Express TS — REST API, Prisma/Postgres Neon saja (tanpa fallback mock; DB mati = 503)
+packages/shared Types + fixture data (seed/test saja, BUKAN fallback runtime)
 prisma/         (schema canonical — dipakai apps/api, lihat apps/api/prisma)
-docker-compose  Postgres 16 lokal
-docs/           Deliverables: 01-requirements-brief, 02-system-design
+neon.ts + .neon   Postgres Neon (org Imam, project Smart City Street, branch production)
+docs/           Deliverables: 01-requirements-brief, 02-system-design, 03-test-plan, 04-handover-guide
 ```
 
-## Cara jalan (mock, tanpa DB dulu)
+## Cara jalan (butuh DB Neon — tanpa fallback mock)
 
 ```bash
 npm install
+cp .env.example .env   # lalu `neon env pull` untuk DATABASE_URL Neon
+npm run db:migrate --workspace=apps/api
+npm run db:seed --workspace=apps/api
 npm run dev:web   # http://localhost:3000
 npm run dev:api   # http://localhost:4000/health
 ```
 
-Web jalan penuh dengan **mock data** — tidak butuh DB untuk klik-klik semua halaman.
+Tanpa `DATABASE_URL` Neon yang valid, API mengembalikan 503 dan web menampilkan
+empty/error state yang jujur — tidak ada data simulasi yang menyamar sebagai data asli.
 
-## Dengan Postgres
-
-```bash
-cp .env.example .env
-docker compose up -d db
-npm run db:migrate --workspace=apps/api
-npm run db:seed --workspace=apps/api
-```
+Login demo: buka `/login`, pilih akun dummy per role (password `sss12345`).
 
 ## Struktur halaman (dipetakan dari Figma Make)
 
-| Route Next.js | Figma `Page` | Keterangan |
-|---|---|---|
-| `/` | discover | Hero + composer + prompt chips |
-| `/conversation` | conversation | Jawaban AI + tender cards + sources |
-| `/conversations` | conversations | Riwayat chat |
-| `/spaces` | spaces | Workspace persistent |
-| `/jobs` | jobs | Jobs & automations |
-| `/documents` | documents | Upload + processing queue |
-| `/data` | data | Database explorer |
-| `/connections` | connections | DB connections |
-| `/reports` | reports | Tender analytics |
-| `/status` | status | System health |
-| `/alerts` | alerts | Alerts operasional |
+| Route Next.js | Figma `Page` | Keterangan | Role |
+|---|---|---|---|
+| `/` | discover | Hero + composer + prompt chips | semua |
+| `/conversation` | conversation | Jawaban AI + tender cards + sources | semua (assistant per-role) |
+| `/conversations` | conversations | Riwayat chat | semua (milik sendiri) |
+| `/spaces` | spaces | Workspace persistent | semua |
+| `/inbox` | — | My inbox: awaiting my decision + my drafts needing action | semua (difilter checker/owner) |
+| `/executive` | — | Executive overview: KPI + snapshot lintas-domain read-only | management |
+| `/quotations` | — | Quotations: CRUD draft + request approval (maker-checker) | sales, operations, management |
+| `/deadlines` | — | Tender closing timeline (overdue/14d/30d/later) | sales, operations, management |
+| `/jobs` | jobs | Jobs & automations | operations, management |
+| `/documents` | documents | Upload + processing queue | semua (domain difilter per-role) |
+| `/data` | data | Database explorer | semua (browser tender: sales/ops/mgmt) |
+| `/finance` | — | Finance overview: invoice + closing checklist read-only | finance, management |
+| `/hr` | — | HR overview: policies + aggregate team capacity (no individual data) | hr, management |
+| `/reports` | reports | Tender analytics + distributor sales tab | sales, operations, management |
 
 State navigasi + toast + composer disentralisasi di `apps/web/src/lib/store.tsx`
 (mirip pola Joule: shell + agent context).
@@ -56,11 +56,22 @@ State navigasi + toast + composer disentralisasi di `apps/web/src/lib/store.tsx`
 ## API stub (apps/api)
 
 - `GET /health`
-- `GET /api/tenders` — daftar tender (mock, nanti ganti Prisma)
-- `GET /api/conversations` — riwayat percakapan
-- `POST /api/chat` — `{ message, assistantId?, role? }` → routing ke assistant per-role (sales/finance/hr/ops/management); tanpa `assistantId` di-infer dari pesan
-- `GET /api/chat/assistants[?role=]` — daftar assistant + skills (ala Joule Studio registry)
-- `GET /api/jobs`, `GET /api/alerts`, `GET /api/reports/summary`
+- Semua endpoint `/api/*` (kecuali `/health`, `/api/auth/users`, demo-login) wajib `X-API-Key`
+- `GET /api/tenders`, `/api/jobs`, `/api/conversations` — baca operasional (semua role aktif); `/api/reports/summary` dan `/api/alerts` dihapus (angka palsu) — reports dihitung live dari `/api/tenders`
+- `POST /api/chat` — `{ message, assistantId? }` → routing assistant per-role + RBAC + audit; infer bila absen
+- `GET /api/chat/assistants` — assistant yang boleh dipakai role user
+- `POST /api/chat/query` — Text-to-SQL read-only (`{ question }` atau `{ sql }`), allowlist tabel/kolom per-role, maks 50 baris
+- `GET /api/documents` — terfilter domain per-role (`general` | `finance` | `hr`); upload bawa `domain`
+- `GET /api/drafts` — milik sendiri (management: semua); `GET /api/drafts/inbox` — awaiting (boleh approve, bukan buatan sendiri) + mine; `POST /api/drafts/:id/approve` — maker-checker (payment: management saja; sales-kind: ops/management bukan pembuat; self-approve → 403); reject/withdraw boleh owner/checker
+- `GET /api/notifications` — notifikasi live per-role (draft menunggu + flag overdue SLA, deadline ≤14 hari, overdue, closing terbuka, extracting, digest Senin management) — bell di Shell
+- `GET /api/finance/overview` — invoice + checklist (finance/management saja)
+- `GET /api/hr/overview` — policies + roster agregat (hr/management saja; tanpa nama/gaji individu by design)
+- Quotations: `GET/POST /api/quotations`, `PATCH /:id` (sales/ops/mgmt; sales hanya milik sendiri; edit hanya draft/rejected; approved/rejected final hanya lewat draft `quotation-review`); tabel `Quotation` terbuka di Text-to-SQL untuk sales/ops/mgmt
+- Scheduler dalam proses: sweep eskalasi tiap jam (`in_review` > `DRAFT_SLA_DAYS`=3 hari → history `escalated` sekali; `updatedAt` asli dipertahankan)
+- `GET /api/audit` — riwayat chat (preview), khusus management (+ halaman `/audits`)
+- `GET /api/conversations` + `GET /api/conversations/:id` — thread chat milik sendiri (persist per user)
+- `POST /api/documents/reindex` — bangun ulang vektor (operations/management; wajib setelah ganti `EMBEDDING_PROVIDER`)
+- `npm run db:backup` — dump Postgres ke `./backups`; `npm test` — vitest (shared) + node:test (api)
 
 Kontrak tipe ada di `packages/shared`.
 

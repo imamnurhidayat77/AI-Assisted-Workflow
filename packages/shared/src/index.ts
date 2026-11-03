@@ -8,8 +8,7 @@ export type PageId =
   | 'data'
   | 'connections'
   | 'reports'
-  | 'status'
-  | 'alerts';
+  | 'status';
 
 export interface Tender {
   id: string;
@@ -23,6 +22,36 @@ export interface Tender {
   priority?: 'High' | 'Medium' | 'Low';
 }
 
+export type QuotationStatus = 'draft' | 'sent' | 'approved' | 'rejected' | 'expired';
+
+export interface Quotation {
+  id: string;
+  number: string;
+  title: string;
+  partner: string;
+  tenderId?: string;
+  amountCents: number;
+  currency: string;
+  status: QuotationStatus;
+  validUntil?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Parse label "24 Nov 2026" (closeLabel tender) → Date. Null bila tak terbaca. */
+export function parseCloseLabel(label: string): Date | null {
+  const MONTHS: Record<string, number> = {
+    Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
+  };
+  const m = label.trim().match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+  if (!m) return null;
+  const mon = MONTHS[m[2]];
+  if (mon === undefined) return null;
+  const d = new Date(Number(m[3]), mon, Number(m[1]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export interface JobItem {
   name: string;
   agent: string;
@@ -30,17 +59,37 @@ export interface JobItem {
   trigger: string;
   lastRun: string;
   progress: string;
-  /** Diisi bila job ini adalah permintaan approval atas sebuah draft. */
+  /** Filled when this job is an approval request for a draft. */
   draftId?: string;
   draftStatus?: DraftStatus;
 }
 
-export interface AlertItem {
-  severity: 'High' | 'Medium' | 'Resolved';
+export type SpaceItemKind = 'conversation' | 'document' | 'tender' | 'note';
+
+export interface SpaceItem {
+  id: string;
+  spaceId: string;
+  kind: string;
+  refId: string;
   title: string;
-  desc: string;
-  module: string;
-  time: string;
+  preview: string;
+  createdAt: string;
+}
+
+export interface SpaceSummary {
+  id: string;
+  name: string;
+  description: string;
+  tone: string;
+  icon: string;
+  createdAt: string;
+  updatedAt: string;
+  itemCount: number;
+  byKind: Record<string, number>;
+}
+
+export interface SpaceDetail extends Omit<SpaceSummary, 'itemCount' | 'byKind'> {
+  items: SpaceItem[];
 }
 
 export interface ConversationItem {
@@ -85,6 +134,18 @@ export interface LeaveRow {
   weekLabel: string;
   headcount: number;
   onLeave: number;
+}
+
+export interface DistributorSale {
+  id: string;
+  distributor: string;
+  country: string;
+  product: string;
+  sku: string;
+  quarter: string;
+  units: number;
+  amountCents: number;
+  currency: string;
 }
 
 export interface ChatResponse {
@@ -140,8 +201,40 @@ export const SKILLS: SkillDefinition[] = [
   { id: 'distributor-import-status', name: 'Distributor Import Status', description: 'Check distributor sales import job status', kind: 'read', consequential: false },
   { id: 'deadline-monitor', name: 'Deadline Monitor', description: 'Monitor tender deadlines + send alerts', kind: 'read', consequential: false },
   { id: 'doc-extract-status', name: 'Document Extract Status', description: 'Check uploaded document extraction status', kind: 'read', consequential: false },
+  { id: 'text-to-sql', name: 'Text-to-SQL', description: 'Answer ad-hoc data questions via validated read-only SQL (allowlisted tables/columns)', kind: 'analyze', consequential: false },
   { id: 'cross-domain-summary', name: 'Cross-domain Summary', description: 'Read-only cross-domain summary for management', kind: 'analyze', consequential: false },
 ];
+
+// --- Text-to-SQL scope: tabel apa boleh dibaca role apa (server enforcement).
+// Kolom sensitif (extractedText, hash, body draft) tidak masuk allowlist mana pun.
+export const SQL_TABLE_COLUMNS: Record<string, string[]> = {
+  Tender: ['id', 'name', 'agency', 'country', 'closesOn', 'closeLabel', 'value', 'product', 'status', 'priority'],
+  Invoice: ['id', 'direction', 'partner', 'amountCents', 'currency', 'status', 'dueLabel'],
+  CloseCheckItem: ['id', 'period', 'item', 'done', 'owner'],
+  HrPolicy: ['id', 'topic', 'title', 'summary'],
+  LeaveRow: ['id', 'team', 'weekLabel', 'headcount', 'onLeave'],
+  Job: ['id', 'name', 'agent', 'state', 'trigger', 'lastRun', 'progress'],
+  Document: ['id', 'fileName', 'sizeLabel', 'status', 'domain', 'createdAt'],
+  DistributorSale: ['id', 'distributor', 'country', 'product', 'sku', 'quarter', 'units', 'amountCents', 'currency'],
+  Quotation: ['id', 'number', 'title', 'partner', 'tenderId', 'amountCents', 'currency', 'status', 'validUntil', 'createdBy', 'createdAt', 'updatedAt'],
+};
+
+export const SQL_TABLE_ROLES: Record<string, RoleId[]> = {
+  Tender: ['sales', 'operations', 'management'],
+  Invoice: ['finance', 'management'],
+  CloseCheckItem: ['finance', 'management'],
+  HrPolicy: ['hr', 'management'],
+  LeaveRow: ['hr', 'management'],
+  Job: ['operations', 'sales', 'management'],
+  Document: ['sales', 'finance', 'hr', 'operations', 'management'],
+  DistributorSale: ['sales', 'operations', 'management'],
+  Quotation: ['sales', 'operations', 'management'],
+};
+
+export function sqlTablesFor(role: RoleId | undefined): string[] {
+  if (!role) return [];
+  return Object.keys(SQL_TABLE_ROLES).filter((t) => SQL_TABLE_ROLES[t].includes(role));
+}
 
 export const ASSISTANTS: AssistantDefinition[] = [
   {
@@ -150,7 +243,7 @@ export const ASSISTANTS: AssistantDefinition[] = [
     name: 'Sales Assistant',
     tagline: 'Tender, quotation & distributor sales',
     description: 'Government tender priorities, quotation checks, distributor sales comparison.',
-    skillIds: ['tender-search', 'tender-analyze', 'quotation-check', 'sales-compare'],
+    skillIds: ['tender-search', 'tender-analyze', 'quotation-check', 'sales-compare', 'text-to-sql'],
     dataScopes: ['tenders', 'quotations', 'distributor_sales', 'documents'],
     systemPrompt:
       'You are the Smart City Street Sales Assistant. Only answer from the LIVE tender list + provided documents. Never invent tender IDs.',
@@ -162,7 +255,7 @@ export const ASSISTANTS: AssistantDefinition[] = [
     name: 'Finance Assistant',
     tagline: 'Invoices, accruals & closing readiness',
     description: 'Invoice status, accrual summary, closing readiness. Payments need human approval.',
-    skillIds: ['invoice-lookup', 'accrual-summary', 'payment-status'],
+    skillIds: ['invoice-lookup', 'accrual-summary', 'payment-status', 'text-to-sql'],
     dataScopes: ['invoices_ar_ap', 'accruals', 'documents'],
     systemPrompt:
       'You are the Finance Assistant. Answer from the aggregate data provided; never show bank/salary details. Consequential actions (payment updates) MUST request approval first, never execute directly.',
@@ -174,7 +267,7 @@ export const ASSISTANTS: AssistantDefinition[] = [
     name: 'HR Assistant',
     tagline: 'Cuti, kebijakan & kapasitas tim',
     description: 'Policy/leave Q&A from HR documents + aggregate capacity summary. No individual salary data.',
-    skillIds: ['leave-policy-qa', 'team-capacity-summary'],
+    skillIds: ['leave-policy-qa', 'team-capacity-summary', 'text-to-sql'],
     dataScopes: ['hr_policies', 'leave_aggregate', 'documents'],
     systemPrompt:
       'You are the HR Assistant. Answer from the policy documents provided. Only show aggregate data (headcount, team leave); NEVER show individual salaries/performance.',
@@ -186,7 +279,7 @@ export const ASSISTANTS: AssistantDefinition[] = [
     name: 'Operations Assistant',
     tagline: 'Import, dokumen & deadline monitoring',
     description: 'Import job status, document extraction, and tender deadline monitoring.',
-    skillIds: ['distributor-import-status', 'deadline-monitor', 'doc-extract-status'],
+    skillIds: ['distributor-import-status', 'deadline-monitor', 'doc-extract-status', 'text-to-sql'],
     dataScopes: ['jobs', 'documents', 'tenders'],
     systemPrompt:
       'You are the Operations Assistant. Report job/document/deadline status from the live data provided.',
@@ -198,7 +291,7 @@ export const ASSISTANTS: AssistantDefinition[] = [
     name: 'Management Assistant',
     tagline: 'Ringkasan lintas-domain read-only',
     description: 'Read-only cross sales/finance/ops orchestration for decisions. No transaction execution.',
-    skillIds: ['cross-domain-summary', 'tender-search', 'sales-compare', 'accrual-summary', 'deadline-monitor'],
+    skillIds: ['cross-domain-summary', 'tender-search', 'sales-compare', 'accrual-summary', 'deadline-monitor', 'text-to-sql'],
     dataScopes: ['tenders', 'distributor_sales', 'invoices_ar_ap', 'jobs'],
     systemPrompt:
       'You are the Management Assistant. Give a cross-domain summary from the data provided, read-only. Highlight risks + priority recommendations, without executing transactions.',
@@ -254,6 +347,47 @@ export function skillsFor(assistantId: string): SkillDefinition[] {
     .filter((s): s is SkillDefinition => Boolean(s));
 }
 
+// --- RBAC minimal: role apa boleh memakai assistant apa (server = enforcement,
+// web = UI gating saja). Management bisa memakai semua kecuali ringkasan eksekutif
+// yang memang khusus management.
+export const ASSISTANT_ROLES: Record<string, RoleId[]> = {
+  'sales-assistant': ['sales', 'operations', 'management'],
+  'finance-assistant': ['finance', 'management'],
+  'hr-assistant': ['hr', 'management'],
+  'ops-assistant': ['operations', 'sales', 'management'],
+  'management-assistant': ['management'],
+};
+
+export function canUseAssistant(role: RoleId | undefined, assistantId: string): boolean {
+  if (!role || role === 'general') return false;
+  return ASSISTANT_ROLES[assistantId]?.includes(role) ?? false;
+}
+
+export function allowedAssistants(role: RoleId | undefined): AssistantDefinition[] {
+  if (!role || role === 'general') return [];
+  return ASSISTANTS.filter((a) => canUseAssistant(role, a.id));
+}
+
+// --- Document domain scoping: dokumen general dibaca semua role aktif;
+// finance/hr hanya oleh role sepadan + management (server enforcement).
+export type DocDomain = 'general' | 'finance' | 'hr';
+
+export function docVisibleToRole(role: RoleId | undefined, domain: string): boolean {
+  if (domain === 'general') return true;
+  if (role === 'management') return true;
+  if (domain === 'finance') return role === 'finance';
+  if (domain === 'hr') return role === 'hr';
+  return false;
+}
+
+export function canUploadDomain(role: RoleId | undefined, domain: string): boolean {
+  if (domain === 'general') return true;
+  if (role === 'management') return true;
+  if (domain === 'finance') return role === 'finance';
+  if (domain === 'hr') return role === 'hr';
+  return false;
+}
+
 // --- Human-in-the-loop Drafts (AI menyusun, manusia memutuskan) ----------------
 // AI tidak pernah mengeksekusi aksi consequential langsung — hanya menghasilkan
 // Draft berstatus draft → in_review → approved / rejected. Semua edit manusia
@@ -272,9 +406,29 @@ export type DraftStatus = 'draft' | 'in_review' | 'approved' | 'rejected';
 
 export interface DraftHistoryEntry {
   at: string;
-  actor: 'ai' | 'human';
-  action: 'created' | 'edited' | 'submitted' | 'approved' | 'rejected';
+  actor: 'ai' | 'human' | 'system';
+  action: 'created' | 'edited' | 'submitted' | 'approved' | 'rejected' | 'escalated';
   note?: string;
+}
+
+// SLA review draft (hari). Override via env DRAFT_SLA_DAYS di API.
+export const DRAFT_SLA_DAYS = 3;
+
+/** True bila draft masih in_review melewati SLA — pure, dipakai API + tests. */
+export function isDraftOverdue(
+  draft: { status: DraftStatus; updatedAt: string },
+  nowMs: number = Date.now(),
+  slaDays: number = DRAFT_SLA_DAYS,
+): boolean {
+  if (draft.status !== 'in_review') return false;
+  const t = Date.parse(draft.updatedAt);
+  if (Number.isNaN(t)) return false;
+  return nowMs - t > slaDays * 86_400_000;
+}
+
+/** True bila draft sudah pernah dieskalasi (idempotensi sweep) — pure. */
+export function wasEscalated(draft: { history: DraftHistoryEntry[] }): boolean {
+  return draft.history.some((h) => h.action === 'escalated');
 }
 
 export interface Draft {
@@ -290,16 +444,53 @@ export interface Draft {
   /** Tautan balik ke dokumen sumber (diisi saat draft dibuat dari /documents). */
   sourceDocumentId?: string;
   sourceDocumentName?: string;
+  /** Tautan balik ke quotation (diisi saat request approval dari /quotations) —
+   * approve draft → quotation approved; reject → quotation kembali draft. */
+  sourceQuotationId?: string;
   createdAt: string;
   updatedAt: string;
   decidedBy?: string;
   decidedAt?: string;
+  /** AppUser.id pembuat — list difilter per user (management: semua). */
+  createdBy?: string;
   history: DraftHistoryEntry[];
 }
 
 /** Draft final (approved/rejected) tidak boleh diedit diam-diam — pure, dipakai API + tests. */
 export function canEditDraftStatus(status: DraftStatus): boolean {
   return status === 'draft' || status === 'in_review';
+}
+
+// --- Approval chain (maker-checker): siapa boleh approve draft apa -----------------
+// Aturan:
+// - payment-approval (uang keluar): hanya management.
+// - tender-brief / quotation-review / sales-summary / approval-summary:
+//   approver harus operations/management DAN bukan pembuatnya (maker ≠ checker).
+//   Draft lama tanpa createdBy tidak digantung: cukup cek role.
+// - general (risiko rendah): pemilik atau management (ownership dicek di route).
+// Pure — dipakai API + tests. Reject/withdraw tidak dibatasi chain ini
+// (menolak = fail-safe; route tetap wajib owner/management).
+
+export type ApproverKind = 'tender-brief' | 'quotation-review' | 'sales-summary' | 'approval-summary' | 'payment-approval' | 'general';
+
+const CHECKED_KINDS: ApproverKind[] = [
+  'tender-brief',
+  'quotation-review',
+  'sales-summary',
+  'approval-summary',
+];
+
+export function canApproveDraft(
+  draft: { kind: DraftKind | string; createdBy?: string | null },
+  approver: { id: string; role: RoleId | string },
+): boolean {
+  if (draft.kind === 'payment-approval') return approver.role === 'management';
+  if ((CHECKED_KINDS as string[]).includes(draft.kind)) {
+    if (approver.role !== 'operations' && approver.role !== 'management') return false;
+    if (draft.createdBy && draft.createdBy === approver.id) return false;
+    return true;
+  }
+  return true;
 }
 
 /** Aturan transisi status — pure, dipakai API + tests. Final (approved) terkunci. */
@@ -332,6 +523,134 @@ export function isDraftStatus(v: unknown): v is DraftStatus {
   return typeof v === 'string' && (DRAFT_STATUSES as string[]).includes(v);
 }
 
+/** Template isi draft per kind — satu bentuk baku agar brief/ringkasan selalu
+ * punya struktur yang sama: ringkasan, fakta kunci, rekomendasi, sumber.
+ * Fakta hanya diisi dari data nyata (kartu tender live / field ekstraksi),
+ * tidak pernah dikarang. Pure, dipakai FE + tests. */
+export interface DraftBodyInput {
+  summary: string;
+  facts?: string[];
+  recommendation?: string;
+  sources?: { label: string; detail: string }[];
+  assistantName?: string;
+  /** Dokumen lampau yang strukturnya ditiru (dari RAG) — ditulis jujur di footer. */
+  templateRefs?: string[];
+}
+
+/** Satu seksi hasil parse body draft — pure, dipakai renderer kartu dokumen. */
+export interface DraftSection {
+  heading: string | null;
+  paragraphs: string[];
+  bullets: string[];
+  table?: { head: string[]; rows: string[][] };
+  footer?: boolean;
+}
+
+/** Parse body template (## heading, - bullet, | tabel |, --- footer) jadi seksi
+ * terstruktur untuk kartu dokumen ala Joule. Pure, dipakai FE + tests. */
+export function parseDraftBody(body: string): DraftSection[] {
+  const sections: DraftSection[] = [];
+  let cur: DraftSection = { heading: null, paragraphs: [], bullets: [] };
+  let tableRows: string[][] = [];
+
+  const flushTable = () => {
+    if (tableRows.length >= 2) {
+      const [head, ...rest] = tableRows;
+      const rows = rest.filter((r) => !r.every((c) => /^:?-+:?$/.test(c.trim())));
+      cur.table = { head, rows };
+    } else if (tableRows.length === 1) {
+      cur.paragraphs.push(tableRows[0].join(' | '));
+    }
+    tableRows = [];
+  };
+  const push = () => {
+    flushTable();
+    if (cur.heading || cur.paragraphs.length || cur.bullets.length || cur.table || cur.footer) {
+      sections.push(cur);
+    }
+    cur = { heading: null, paragraphs: [], bullets: [] };
+  };
+
+  for (const raw of body.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line === '---') {
+      push();
+      cur.footer = true;
+      continue;
+    }
+    if (cur.footer) {
+      cur.paragraphs.push(line);
+      continue;
+    }
+    if (line.startsWith('## ')) {
+      push();
+      cur.heading = line.slice(3).trim();
+      continue;
+    }
+    if (line.startsWith('- ')) {
+      flushTable();
+      cur.bullets.push(line.slice(2).trim());
+      continue;
+    }
+    if (line.includes('|') && line.split('|').filter((c) => c.trim()).length >= 2) {
+      const cells = line.split('|').map((c) => c.trim()).filter((c) => c !== '');
+      if (cells.length >= 2) {
+        tableRows.push(cells);
+        continue;
+      }
+    }
+    flushTable();
+    cur.paragraphs.push(line);
+  }
+  push();
+  return sections;
+}
+
+const FACTS_LABEL: Record<DraftKind, string> = {
+  'tender-brief': 'Key tender facts',
+  'approval-summary': 'Key facts',
+  'quotation-review': 'Key quotation facts',
+  'sales-summary': 'Key sales facts',
+  'payment-approval': 'Key payment facts',
+  general: 'Key facts',
+};
+
+export function renderDraftBody(kind: DraftKind, input: DraftBodyInput): string {
+  const parts: string[] = [input.summary.trim()];
+  if (input.facts?.length) {
+    parts.push(`## ${FACTS_LABEL[kind]}\n${input.facts.map((f) => `- ${f}`).join('\n')}`);
+  }
+  if (input.recommendation?.trim()) {
+    parts.push(`## Recommendation\n${input.recommendation.trim()}`);
+  }
+  if (input.sources?.length) {
+    parts.push(`## Sources\n${input.sources.map((s) => `- ${s.label}${s.detail ? ` — ${s.detail}` : ''}`).join('\n')}`);
+  }
+  const footer = [`Prepared by ${input.assistantName ?? 'Street Smart AI'} · ${new Date().toISOString().slice(0, 10)} · Status: draft — AI drafts, humans decide.`];
+  if (input.templateRefs?.length) {
+    footer.push(`Structure follows: ${input.templateRefs.join(', ')} (past uploads — facts still from live data).`);
+  }
+  parts.push(`---\n${footer.join(' ')}`);
+  return parts.filter(Boolean).join('\n\n');
+}
+
+function tenderFactLine(id: string): string | null {
+  const t = tenders.find((x) => x.id === id);
+  return t ? `${t.id} — ${t.name} (${t.agency}, ${t.value}, closes ${t.date}, ${t.status})` : null;
+}
+
+/** Nama file dokumen lampau dari sitasi RAG (detail 'part #N') — dipakai sebagai
+ * referensi template yang jujur. Pure. */
+export function templateRefsFromSources(sources: { label: string; detail: string }[] | undefined): string[] {
+  if (!sources) return [];
+  const out: string[] = [];
+  for (const s of sources) {
+    if (/^part #\d+/.test(s.detail.trim()) && !out.includes(s.label)) out.push(s.label);
+  }
+  return out.slice(0, 3);
+}
+
 /** Bangun draft awal dari jawaban chat — dipakai FE saat API tidak terjangkau. */
 export function buildDraftFromChat(
   question: string,
@@ -339,13 +658,19 @@ export function buildDraftFromChat(
   kind: DraftKind = 'general',
 ): Draft {
   const now = new Date().toISOString();
+  const assistantName = ASSISTANTS.find((a) => a.id === answer.assistantId)?.name;
   return {
     id: `local-${Date.now()}`,
     kind,
     title: answer.answerTitle || `Draft for: ${question.slice(0, 60)}`,
-    body: [answer.answerCopy, answer.recommendation ? `Rekomendasi: ${answer.recommendation}` : '']
-      .filter(Boolean)
-      .join('\n\n'),
+    body: renderDraftBody(kind, {
+      summary: answer.answerCopy,
+      facts: (answer.tenderIds ?? []).map(tenderFactLine).filter((f): f is string => Boolean(f)),
+      recommendation: answer.recommendation,
+      sources: answer.sources ?? [],
+      assistantName,
+      templateRefs: templateRefsFromSources(answer.sources),
+    }),
     status: 'draft',
     assistantId: answer.assistantId,
     skillsUsed: answer.skillsUsed ?? [],
@@ -398,7 +723,7 @@ export function draftToJob(d: Draft): JobItem {
   };
 }
 
-/** Petakan jenis ekstraksi → kind draft agar "Buat draft" reuse API /api/drafts. */
+/** Map extraction kind → draft kind so "Create draft" reuses the /api/drafts API. */
 export function draftKindForExtraction(kind: string): DraftKind {
   const k = kind.toLowerCase();
   if (k.includes('tender')) return 'tender-brief';
@@ -408,7 +733,21 @@ export function draftKindForExtraction(kind: string): DraftKind {
   return 'general';
 }
 
-// --- Mock data (moved from Figma Make App.tsx, single source of truth) ---
+/** Offline fallback for the Spaces list (same 4 workspaces as the DB seed). */
+export const fallbackSpaces: SpaceSummary[] = [
+  { id: 'sp-tender-review', name: 'Tender Opportunity Review', description: 'Review and prioritize active government tenders.', tone: 'amber', icon: 'file', createdAt: '', updatedAt: '', itemCount: 1, byKind: { tender: 1 } },
+  { id: 'sp-distributor', name: 'Distributor Performance', description: 'Analyze sales by region, product, and quarter.', tone: 'blue', icon: 'chart', createdAt: '', updatedAt: '', itemCount: 1, byKind: { note: 1 } },
+  { id: 'sp-product', name: 'Product Portfolio Intelligence', description: 'Explore catalogue, pricing, and sales trends.', tone: 'green', icon: 'grid', createdAt: '', updatedAt: '', itemCount: 0, byKind: {} },
+  { id: 'sp-response', name: 'Government Tender Response', description: 'Organize requirements, compliance, and tasks.', tone: 'purple', icon: 'check', createdAt: '', updatedAt: '', itemCount: 0, byKind: {} },
+];
+
+// --- Fixture data (originally from Figma Make App.tsx) --------------------------------
+// NOTE: the arrays below are NOT runtime fallbacks. The API never serves them when
+// the DB is down (services throw 503 instead). Remaining uses:
+//   1. `apps/api/prisma/seed.ts` — initial database content,
+//   2. unit tests as deterministic fixtures,
+//   3. `mockChatAnswer` — used by tests + labelled offline-emergency answers in web.
+// Do not add new live-path usages.
 
 export const prompts: string[] = [
   'Which government tenders should we prioritize this month?',
@@ -436,12 +775,6 @@ export const jobs: JobItem[] = [
   { name: 'Weekly Sales Summary', agent: 'Distributor Sales Agent', state: 'Scheduled', trigger: 'Monday, 8:00 AM', lastRun: 'Yesterday', progress: '—' },
 ];
 
-export const alerts: AlertItem[] = [
-  { severity: 'High', title: 'Tender deadline in 5 days', desc: 'Auckland Smart Road Upgrade requires final compliance review.', module: 'Tender pipeline', time: '12 minutes ago' },
-  { severity: 'Medium', title: 'API sync delayed', desc: 'Distributor Sales Warehouse synchronization is running 18 minutes behind.', module: 'Data connections', time: '42 minutes ago' },
-  { severity: 'Resolved', title: 'Document extraction retried', desc: 'A scanned appendix was successfully processed on the second attempt.', module: 'Document ingestion', time: 'Yesterday' },
-];
-
 export const invoices: Invoice[] = [
   { id: 'INV-AR-2101', direction: 'AR', partner: 'Auckland Distributor Ltd', amountCents: 18400000, currency: 'NZD', status: 'UNPAID', dueLabel: '28 Nov 2026' },
   { id: 'INV-AR-2098', direction: 'AR', partner: 'Wellington Infra Supplies', amountCents: 9600000, currency: 'NZD', status: 'OVERDUE', dueLabel: '17 Nov 2026' },
@@ -459,9 +792,9 @@ export const closeChecklist: CloseCheckItem[] = [
 ];
 
 export const hrPolicies: HrPolicy[] = [
-  { id: 'HR-POL-LEAVE', topic: 'leave', title: 'Annual & sick leave', summary: 'Cuti tahunan 20 hari, sick leave 10 hari per tahun. Pengajuan H-7 via HR.' },
-  { id: 'HR-POL-REMOTE', topic: 'remote', title: 'Hybrid work', summary: 'Maks 2 hari remote per minggu dengan persetujuan lead tim.' },
-  { id: 'HR-POL-TRAVEL', topic: 'travel', title: 'Site travel', summary: 'Perjalanan site NZ butuh approval ops lead; klaim maksimal 14 hari setelah trip.' },
+  { id: 'HR-POL-LEAVE', topic: 'leave', title: 'Annual & sick leave', summary: '20 days annual leave, 10 days sick leave per year. Apply H-7 via HR.' },
+  { id: 'HR-POL-REMOTE', topic: 'remote', title: 'Hybrid work', summary: 'Up to 2 remote days per week with team lead approval.' },
+  { id: 'HR-POL-TRAVEL', topic: 'travel', title: 'Site travel', summary: 'NZ site trips need ops lead approval; claims within 14 days after the trip.' },
 ];
 
 export const leaveRoster: LeaveRow[] = [
@@ -470,9 +803,60 @@ export const leaveRoster: LeaveRow[] = [
   { id: 'LV-2026-W46-FIN', team: 'Finance', weekLabel: 'W46 (9–15 Nov)', headcount: 4, onLeave: 0 },
 ];
 
+/** Distributor sales (aggregate, no customer PII). Story: NZ flat on units, AU +14% Q2→Q3, SRS-8 leads (+22% NZ). */
+export const distributorSales: DistributorSale[] = [
+  { id: 'DS-NZ-Q2-SRS8', distributor: 'Auckland Distributor Ltd', country: 'New Zealand', product: 'Smartstud', sku: 'SRS-8', quarter: '2026-Q2', units: 1000, amountCents: 14500000, currency: 'NZD' },
+  { id: 'DS-NZ-Q3-SRS8', distributor: 'Auckland Distributor Ltd', country: 'New Zealand', product: 'Smartstud', sku: 'SRS-8', quarter: '2026-Q3', units: 1220, amountCents: 17690000, currency: 'NZD' },
+  { id: 'DS-NZ-Q2-SPD4', distributor: 'Auckland Distributor Ltd', country: 'New Zealand', product: 'Smartped', sku: 'SPD-4', quarter: '2026-Q2', units: 800, amountCents: 7600000, currency: 'NZD' },
+  { id: 'DS-NZ-Q3-SPD4', distributor: 'Auckland Distributor Ltd', country: 'New Zealand', product: 'Smartped', sku: 'SPD-4', quarter: '2026-Q3', units: 680, amountCents: 6460000, currency: 'NZD' },
+  { id: 'DS-NZ-Q2-TNL2', distributor: 'Auckland Distributor Ltd', country: 'New Zealand', product: 'Tunnel markers', sku: 'TNL-2', quarter: '2026-Q2', units: 500, amountCents: 3000000, currency: 'NZD' },
+  { id: 'DS-NZ-Q3-TNL2', distributor: 'Auckland Distributor Ltd', country: 'New Zealand', product: 'Tunnel markers', sku: 'TNL-2', quarter: '2026-Q3', units: 400, amountCents: 2400000, currency: 'NZD' },
+  { id: 'DS-AU-Q2-SRS8', distributor: 'Brisbane Road Systems', country: 'Australia', product: 'Smartstud', sku: 'SRS-8', quarter: '2026-Q2', units: 1200, amountCents: 17400000, currency: 'AUD' },
+  { id: 'DS-AU-Q3-SRS8', distributor: 'Brisbane Road Systems', country: 'Australia', product: 'Smartstud', sku: 'SRS-8', quarter: '2026-Q3', units: 1500, amountCents: 21750000, currency: 'AUD' },
+  { id: 'DS-AU-Q2-SPD4', distributor: 'Brisbane Road Systems', country: 'Australia', product: 'Smartped', sku: 'SPD-4', quarter: '2026-Q2', units: 900, amountCents: 8550000, currency: 'AUD' },
+  { id: 'DS-AU-Q3-SPD4', distributor: 'Brisbane Road Systems', country: 'Australia', product: 'Smartped', sku: 'SPD-4', quarter: '2026-Q3', units: 990, amountCents: 9405000, currency: 'AUD' },
+  { id: 'DS-AU-Q2-TNL2', distributor: 'Brisbane Road Systems', country: 'Australia', product: 'Tunnel markers', sku: 'TNL-2', quarter: '2026-Q2', units: 600, amountCents: 3600000, currency: 'AUD' },
+  { id: 'DS-AU-Q3-TNL2', distributor: 'Brisbane Road Systems', country: 'Australia', product: 'Tunnel markers', sku: 'TNL-2', quarter: '2026-Q3', units: 600, amountCents: 3600000, currency: 'AUD' },
+];
+
 export function formatMoney(cents: number, currency: string): string {
   const n = cents / 100;
   return `${currency} ${n.toLocaleString('en-NZ', { maximumFractionDigits: 0 })}`;
+}
+
+/** Sales answer computed from live distributor rows — never hardcoded. */
+export function salesAnswer(rows: DistributorSale[], viaLabel: string): ChatResponse {
+  const by = (country: string, quarter: string) => rows.filter((r) => r.country === country && r.quarter === quarter);
+  const units = (rs: DistributorSale[]) => rs.reduce((a, r) => a + r.units, 0);
+  const nzQ2 = by('New Zealand', '2026-Q2');
+  const nzQ3 = by('New Zealand', '2026-Q3');
+  const auQ2 = by('Australia', '2026-Q2');
+  const auQ3 = by('Australia', '2026-Q3');
+  const pct = (a: number, b: number) => (a ? `${(((b - a) / a) * 100).toFixed(1)}%` : 'n/a');
+  const prod = (sku: string) => {
+    const q2 = rows.filter((r) => r.sku === sku && r.quarter === '2026-Q2').reduce((a, r) => a + r.units, 0);
+    const q3 = rows.filter((r) => r.sku === sku && r.quarter === '2026-Q3').reduce((a, r) => a + r.units, 0);
+    return { q2, q3, sku };
+  };
+  const skus = [...new Set(rows.map((r) => r.sku))].map(prod).sort((a, b) => b.q3 - a.q3);
+  const top = skus[0];
+  return {
+    answerTitle: `Distributor snapshot: NZ vs AU (${viaLabel})`,
+    answerCopy:
+      `New Zealand ${units(nzQ2).toLocaleString()} → ${units(nzQ3).toLocaleString()} units Q2→Q3 (${pct(units(nzQ2), units(nzQ3))}, essentially flat). ` +
+      `Australia ${units(auQ2).toLocaleString()} → ${units(auQ3).toLocaleString()} units (${pct(units(auQ2), units(auQ3))} growth). ` +
+      (top ? `Top SKU: ${top.sku} at ${top.q3.toLocaleString()} units in Q3 (${pct(top.q2, top.q3)} vs Q2). ` : '') +
+      `Full breakdown is in Distributor Performance space.`,
+    tenderIds: [],
+    recommendation: 'Follow up on declining NZ distributors first, and replicate the successful AU bundling.',
+    sources: [
+      { label: 'Distributor sales (live rows)', detail: `${rows.length} rows · ${viaLabel}` },
+      { label: 'Distributor Performance Space', detail: 'Updated yesterday' },
+    ],
+    followUps: ['Show NZ distributors with declining sales', 'Which SKUs drive growth?', 'Total revenue by quarter'],
+    assistantId: 'sales-assistant',
+    skillsUsed: ['sales-compare'],
+  };
 }
 
 export const conversationHistory: ConversationItem[] = [
@@ -490,15 +874,20 @@ export function financeAnswer(inv: Invoice[], cc: CloseCheckItem[], viaLabel: st
   const overdue = inv.filter((i) => i.status === 'OVERDUE');
   const done = cc.filter((c) => c.done).length;
   const pending = cc.filter((c) => !c.done).map((c) => c.item);
+  const lines = [
+    `Open AR ${formatMoney(sum(open('AR')), cur)} (${open('AR').length} invoices) · Open AP ${formatMoney(sum(open('AP')), cur)} (${open('AP').length} invoices)`,
+    '',
+    ...(overdue.length
+      ? ['Overdue — needs action:', ...overdue.map((i) => `• ${i.id} — ${i.partner} — ${formatMoney(i.amountCents, i.currency)} (due ${i.dueLabel})`), '']
+      : ['No overdue invoices.', '']),
+    `Month-end close ${cc[0]?.period ?? ''}: ${done}/${cc.length} done` +
+      (pending.length ? '\n' + pending.map((p) => `• [ ] ${p}`).join('\n') : ' — all clear'),
+    '',
+    'Payment actions need human approval — I prepare the draft, never execute directly.',
+  ];
   return {
     answerTitle: `Finance snapshot (${viaLabel})`,
-    answerCopy:
-      `Open AR ${formatMoney(sum(open('AR')), cur)} (${open('AR').length} invoices), ` +
-      `open AP ${formatMoney(sum(open('AP')), cur)} (${open('AP').length} invoices). ` +
-      (overdue.length ? `Overdue: ${overdue.map((i) => `${i.id} (${i.partner}, due ${i.dueLabel})`).join('; ')}. ` : 'No overdue invoices. ') +
-      `Closing ${cc[0]?.period ?? ''}: ${done}/${cc.length} checklist items done` +
-      (pending.length ? ` — remaining: ${pending.join('; ')}` : '') +
-      `. Payment actions need human approval — I prepare the draft, never execute directly.`,
+    answerCopy: lines.join('\n'),
     tenderIds: [],
     recommendation: pending.length
       ? `Finish "${pending[0]}" first, then approve the overdue AP payments.`
@@ -513,17 +902,60 @@ export function financeAnswer(inv: Invoice[], cc: CloseCheckItem[], viaLabel: st
   };
 }
 
+/** Ops answer computed from live jobs + document stats — never hardcoded. */
+export interface DocStats {
+  total: number;
+  byStatus: Record<string, number>;
+  processing: string[];
+}
+
+export function opsAnswer(jobsList: JobItem[], docs: DocStats, viaLabel: string): ChatResponse {
+  const running = jobsList.filter((j) => /running|active/i.test(j.state));
+  const byState = (s: string) => jobsList.filter((j) => j.state.toLowerCase() === s).length;
+  const alerts: string[] = [];
+  if (docs.byStatus.Processing) alerts.push(`${docs.byStatus.Processing} document(s) still extracting`);
+  const stale = jobsList.find((j) => /behind|delay/i.test(`${j.name} ${j.agent} ${j.lastRun}`));
+  const lines = [
+    `${jobsList.length} tracked jobs · ${running.length} active · ${byState('completed')} completed · ${byState('scheduled')} scheduled`,
+    '',
+    `Documents: ${docs.total} total` +
+      (Object.keys(docs.byStatus).length ? ` (${Object.entries(docs.byStatus).map(([s, n]) => `${n} ${s}`).join(' · ')})` : ''),
+    ...(docs.processing.length ? [`Extracting now:\n` + docs.processing.slice(0, 3).map((f) => `• ${f}`).join('\n')] : []),
+    ...(stale ? ['', `Watch: ${stale.name} (${stale.lastRun})`] : []),
+    ...(alerts.length ? ['', `Alerts: ${alerts.join(' · ')}`] : []),
+  ];
+  return {
+    answerTitle: `Operations status (${viaLabel})`,
+    answerCopy: lines.join('\n'),
+    tenderIds: [],
+    recommendation: docs.byStatus.Processing
+      ? 'Wait for extraction to finish before tender analysis; check Data connections for delays.'
+      : 'Queue is clear — safe to run tender analysis and weekly summaries.',
+    sources: [
+      { label: 'Jobs queue', detail: viaLabel },
+      { label: 'Document ingestion', detail: viaLabel },
+    ],
+    followUps: ['Show running jobs', 'Which documents are still processing?', 'Show upcoming deadlines'],
+    assistantId: 'ops-assistant',
+    skillsUsed: ['distributor-import-status', 'doc-extract-status', 'deadline-monitor'],
+  };
+}
+
 /** HR answer from policies + aggregate roster (no individual names/salaries). */
 export function hrAnswer(pol: HrPolicy[], ros: LeaveRow[], viaLabel: string): ChatResponse {
   const headcount = ros.reduce((a, r) => a + r.headcount, 0);
   const onLeave = ros.reduce((a, r) => a + r.onLeave, 0);
   const leave = pol.find((p) => p.topic === 'leave');
+  const lines = [
+    ...(leave ? [`Policy: ${leave.summary}`, ''] : []),
+    `Capacity: ${headcount} people, ${onLeave} on leave`,
+    ...ros.map((r) => `• ${r.team}: ${r.onLeave}/${r.headcount} on leave (${r.weekLabel})`),
+    '',
+    'Individual salary details are never shown.',
+  ];
   return {
     answerTitle: `HR snapshot (${viaLabel})`,
-    answerCopy:
-      (leave ? `Policy: ${leave.summary} ` : '') +
-      `Aggregate capacity: ${headcount} people, ${onLeave} on leave (${ros.map((r) => `${r.team} ${r.onLeave}/${r.headcount}`).join(', ')}). ` +
-      `Individual salary details are never shown.`,
+    answerCopy: lines.join('\n'),
     tenderIds: [],
     recommendation: 'Apply for leave 7 days ahead via HR; check the weekly summary before assigning new projects.',
     sources: [
@@ -542,26 +974,17 @@ export function mockChatAnswer(question: string, assistantId?: string): ChatResp
   if (aid === 'finance-assistant') return financeAnswer(invoices, closeChecklist, 'simulated');
   if (aid === 'hr-assistant') return hrAnswer(hrPolicies, leaveRoster, 'simulated');
   if (aid === 'ops-assistant') {
-    return {
-      answerTitle: 'Operations status (simulated)',
-      answerCopy:
-        'Distributor Sales Import: completed 35 min ago. Document Extraction: running at 68%. Tender Deadline Monitoring: active (checks every 6 hours). 1 alert: 18 min sync delay.',
-      tenderIds: [],
-      recommendation: 'Wait for extraction to finish before tender analysis; check Data connections for the sync delay.',
-      sources: [
-        { label: 'Jobs queue', detail: 'Live' },
-        { label: 'Document ingestion', detail: 'Live' },
-      ],
-      followUps: ['Show running jobs', 'Which documents are still processing?', 'Show upcoming deadlines'],
-      assistantId: 'ops-assistant',
-      skillsUsed: ['distributor-import-status', 'doc-extract-status', 'deadline-monitor'],
-    };
+    return opsAnswer(jobs, { total: 3, byStatus: { Processed: 1, Processing: 1, Completed: 1 }, processing: ['Distributor_Sales_Q3.xlsx'] }, 'simulated');
   }
   if (aid === 'management-assistant') {
     return {
       answerTitle: 'Executive summary (simulated, read-only)',
       answerCopy:
-        'Active pipeline: 6 tenders (3 NZ priorities). Sales AU +14%, NZ flat. Finance: closing 3/5 ready. Ops: 1 sync delay. Top risks: Auckland deadline in 5 days + incomplete accruals.',
+        'Pipeline: 6 tenders (3 NZ priorities)\n' +
+        '• Sales: AU +14%, NZ flat\n' +
+        '• Finance: closing 3/5 ready\n' +
+        '• Ops: 1 sync delay\n' +
+        '\nTop risks: Auckland deadline in 5 days + incomplete accruals.',
       tenderIds: ['TND-2026-001', 'TND-2026-002', 'TND-2026-003'],
       recommendation: 'This week focus: Auckland compliance review + complete accruals + follow up NZ distributors.',
       sources: [
@@ -578,7 +1001,10 @@ export function mockChatAnswer(question: string, assistantId?: string): ChatResp
     return {
       answerTitle: 'Distributor snapshot: NZ vs AU',
       answerCopy:
-        'Australia grew ~14% in Q3 while New Zealand stayed flat. Smartstud SRS-8 leads growth at +22% QoQ. Full breakdown is in Distributor Performance space.',
+        '• Australia: +14% in Q3\n' +
+        '• New Zealand: flat\n' +
+        '• Top SKU: Smartstud SRS-8 (+22% QoQ)\n' +
+        '\nFull breakdown is in Distributor Performance space.',
       tenderIds: [],
       recommendation: 'Follow up on declining NZ distributors first, and replicate the successful AU bundling.',
       sources: [
@@ -594,7 +1020,8 @@ export function mockChatAnswer(question: string, assistantId?: string): ChatResp
     return {
       answerTitle: 'Five quotations await approval',
       answerCopy:
-        'Total value ~NZD 310K across Smartstud and Smartped lines. Two are linked to Auckland and Wellington tenders closing within 30 days.',
+        '• Total value: ~NZD 310K (Smartstud + Smartped lines)\n' +
+        '• 2 linked to Auckland and Wellington tenders closing within 30 days',
       tenderIds: ['TND-2026-001', 'TND-2026-002'],
       recommendation: 'Approve Auckland-linked quotations first to unblock tender compliance.',
       sources: [

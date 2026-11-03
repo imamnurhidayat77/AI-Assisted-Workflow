@@ -1,19 +1,36 @@
 import { PrismaClient } from '@prisma/client';
-import type { DocumentExtraction, ExtractionField } from '@street-smart/shared';
+import {
+  docVisibleToRole,
+  type DocDomain,
+  type DocumentExtraction,
+  type ExtractionField,
+  type RoleId,
+} from '@street-smart/shared';
 
 export interface DocRecord {
   id: string;
   fileName: string;
   sizeLabel: string;
   status: string;
+  domain: DocDomain;
   createdAt: string;
 }
 
-const SEED_DOCS: DocRecord[] = [
-  { id: 'seed-1', fileName: 'NZTA_Tender_2026.pdf', sizeLabel: '4.8 MB', status: 'Processed', createdAt: new Date().toISOString() },
-  { id: 'seed-2', fileName: 'Distributor_Sales_Q3.xlsx', sizeLabel: '2.1 MB', status: 'Processing', createdAt: new Date().toISOString() },
-  { id: 'seed-3', fileName: 'Smartstud_Quotation_1042.pdf', sizeLabel: '860 KB', status: 'Completed', createdAt: new Date().toISOString() },
-];
+function toRecord(r: { id: string; fileName: string; sizeLabel: string | null; status: string; domain: string; createdAt: Date }): DocRecord {
+  return {
+    id: r.id,
+    fileName: r.fileName,
+    sizeLabel: r.sizeLabel ?? '—',
+    status: r.status,
+    domain: (r.domain === 'finance' || r.domain === 'hr' ? r.domain : 'general') as DocDomain,
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
+function dbError(e: unknown): never {
+  if (e && typeof (e as { status?: unknown }).status === 'number') throw e;
+  throw Object.assign(new Error('database unreachable'), { status: 503 });
+}
 
 /**
  * Penyimpanan dokumen: Prisma/Postgres kalau reachable,
@@ -21,63 +38,56 @@ const SEED_DOCS: DocRecord[] = [
  */
 class DocumentStore {
   private prisma: PrismaClient | null = null;
-  private memory: DocRecord[] = [...SEED_DOCS];
-  private seq = 100;
 
-  private async db(): Promise<PrismaClient | null> {
+  private async db(): Promise<PrismaClient> {
     if (this.prisma) return this.prisma;
-    if (!process.env.DATABASE_URL) return null;
+    if (!process.env.DATABASE_URL) throw Object.assign(new Error('database unreachable'), { status: 503 });
     try {
       const client = new PrismaClient();
       await client.$queryRaw`SELECT 1`;
       this.prisma = client;
       return client;
-    } catch {
-      return null;
+    } catch (e) {
+      dbError(e);
     }
   }
 
-  async list(): Promise<DocRecord[]> {
-    const db = await this.db();
-    if (!db) return [...this.memory].reverse();
-    const rows = await db.document.findMany({ orderBy: { createdAt: 'desc' } });
-    return rows.map((r) => ({ id: r.id, fileName: r.fileName, sizeLabel: r.sizeLabel ?? '—', status: r.status, createdAt: r.createdAt.toISOString() }));
+  /** Daftar dokumen terlihat oleh role (domain scoping). DB mati → 503, tanpa data palsu. */
+  async list(role?: RoleId): Promise<DocRecord[]> {
+    const visible = (d: DocDomain) => docVisibleToRole(role, d);
+    const db = await this.db().catch(dbError);
+    const rows = await db.document.findMany({ orderBy: { createdAt: 'desc' } }).catch(dbError);
+    return rows.map(toRecord).filter((d) => visible(d.domain));
   }
 
-  async create(input: { fileName: string; sizeLabel: string }): Promise<DocRecord> {
-    const db = await this.db();
-    if (!db) {
-      const rec: DocRecord = { id: `mem-${this.seq++}`, ...input, status: 'Processing', createdAt: new Date().toISOString() };
-      this.memory.push(rec);
-      return rec;
-    }
-    const row = await db.document.create({ data: { fileName: input.fileName, sizeLabel: input.sizeLabel, status: 'Processing' } });
-    return { id: row.id, fileName: row.fileName, sizeLabel: row.sizeLabel ?? '—', status: row.status, createdAt: row.createdAt.toISOString() };
+  async create(input: { fileName: string; sizeLabel: string; domain?: DocDomain }): Promise<DocRecord> {
+    const domain: DocDomain = input.domain === 'finance' || input.domain === 'hr' ? input.domain : 'general';
+    const db = await this.db().catch(dbError);
+    const row = await db.document.create({ data: { fileName: input.fileName, sizeLabel: input.sizeLabel, status: 'Processing', domain } }).catch(dbError);
+    return toRecord(row);
   }
 
   async setStatus(id: string, status: string): Promise<void> {
-    const db = await this.db();
-    if (!db) {
-      const rec = this.memory.find((d) => d.id === id);
-      if (rec) rec.status = status;
-      return;
-    }
+    const db = await this.db().catch(() => null);
+    if (!db) return;
     await db.document.update({ where: { id }, data: { status } }).catch(() => {});
   }
 
-  async remove(id: string): Promise<DocRecord | null> {
-    const db = await this.db();
-    if (!db) {
-      const i = this.memory.findIndex((d) => d.id === id);
-      return i >= 0 ? this.memory.splice(i, 1)[0] : null;
-    }
+  async remove(id: string, role?: RoleId): Promise<DocRecord | null> {
+    const cur = await this.get(id, role);
+    if (!cur) return null;
+    const db = await this.db().catch(dbError);
     const row = await db.document.delete({ where: { id } }).catch(() => null);
-    return row ? { id: row.id, fileName: row.fileName, sizeLabel: row.sizeLabel ?? '—', status: row.status, createdAt: row.createdAt.toISOString() } : null;
+    return row ? toRecord(row) : null;
   }
 
-  async get(id: string): Promise<DocRecord | null> {
-    const all = await this.list();
-    return all.find((d) => d.id === id) ?? null;
+  /** Get satu dokumen — hanya bila role boleh melihat domain-nya. */
+  async get(id: string, role?: RoleId): Promise<DocRecord | null> {
+    const db = await this.db().catch(dbError);
+    const row = await db.document.findUnique({ where: { id } }).catch(dbError);
+    if (!row) return null;
+    const rec = toRecord(row);
+    return docVisibleToRole(role, rec.domain) ? rec : null;
   }
 }
 
@@ -89,7 +99,9 @@ export function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** Simulasi hasil ekstraksi terstruktur — deterministik dari nama file.
+/** Baseline heuristik deterministik dari nama file — HANYA dipakai eval
+ * (`eval/score-extraction.ts`) sebagai pembanding ekstraksi LLM, TIDAK dipakai
+ * route mana pun (route mengembalikan data RAG asli atau 422 jujur).
  * Pola Receipt Analysis Agent: tiap field membawa confidence + source agar
  * manusia tahu mana yang terbaca langsung vs dilengkapi AI vs hilang. */
 export function extractDocument(doc: DocRecord): DocumentExtraction {

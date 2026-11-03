@@ -1,10 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import {
-  closeChecklist as mockChecklist,
-  invoices as mockInvoices,
-  type CloseCheckItem,
-  type Invoice,
-} from '@street-smart/shared';
+import type { CloseCheckItem, Invoice } from '@street-smart/shared';
 
 let client: PrismaClient | null = null;
 
@@ -21,20 +16,21 @@ async function db(): Promise<PrismaClient | null> {
   }
 }
 
-/** Invoice + checklist dari Postgres; fallback ke mock bila DB mati. */
-export async function getFinanceSnapshot(): Promise<{
+/** Invoice + checklist dari Postgres. Tanpa fallback mock: DB mati → 503 eksplisit. */
+export interface FinanceSnapshot {
   invoices: Invoice[];
   checklist: CloseCheckItem[];
-  via: 'db' | 'mock';
-}> {
+  via: 'db';
+}
+
+export async function getFinanceSnapshot(): Promise<FinanceSnapshot> {
   const prisma = await db();
-  if (!prisma) return { invoices: mockInvoices, checklist: mockChecklist, via: 'mock' };
+  if (!prisma) throw Object.assign(new Error('database unreachable'), { status: 503 });
   try {
     const [inv, cc] = await Promise.all([
       prisma.invoice.findMany({ orderBy: { createdAt: 'asc' } }),
       prisma.closeCheckItem.findMany({ orderBy: { id: 'asc' } }),
     ]);
-    if (!inv.length) return { invoices: mockInvoices, checklist: mockChecklist, via: 'mock' };
     return {
       invoices: inv.map((i) => ({
         id: i.id,
@@ -48,7 +44,8 @@ export async function getFinanceSnapshot(): Promise<{
       checklist: cc.map((c) => ({ id: c.id, period: c.period, item: c.item, done: c.done, owner: c.owner })),
       via: 'db',
     };
-  } catch {
-    return { invoices: mockInvoices, checklist: mockChecklist, via: 'mock' };
+  } catch (e) {
+    if (e && typeof (e as { status?: unknown }).status === 'number') throw e;
+    throw Object.assign(new Error('database query failed'), { status: 503 });
   }
 }

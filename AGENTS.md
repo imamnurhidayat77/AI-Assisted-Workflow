@@ -11,12 +11,26 @@ Perintah: `/ponytail lite|full|ultra`, `/ponytail-review`, `/ponytail-audit`, `/
 
 Yang tidak boleh dipotong: validasi, error handling anti data-loss, keamanan, aksesibilitas, dan yang user minta eksplisit.
 
+## Bahasa
+
+- **UI wajib English semua** — semua string user-facing (halaman, tombol, toast, error, placeholder) dalam English. Jangan campur Indonesian di UI.
+- Komentar kode mengikuti konvensi file sekitarnya (boleh Indonesian bila file-nya begitu).
+
 ## Peta repo
 
 - `apps/web` Next.js 15 (App Router, TS, Tailwind v4) — state di `apps/web/src/lib/store.tsx`
 - `apps/api` Express TS — REST (`/health`, `/api/tenders`, `/api/chat`, `/api/jobs`, `/api/alerts`, `/api/reports/summary`)
 - `packages/shared` kontrak tipe + mock data
 - `figma-make/` referensi saja, jangan diedit
+
+## Database — Neon SAJA (jangan pakai docker lagi)
+
+- Project: **Smart City Street** (`proud-heart-43211945`), region Sydney, branch utama `production`.
+  `DATABASE_URL` Neon live di `apps/api/.env` (gitignored — jangan pernah commit/copy ke chat).
+- Perintah DB selalu dari `apps/api`: `npx prisma migrate status|deploy`, `npm run seed`, `npm run eval`.
+- `docker compose.yml` peninggalan lokal — jangan dihidupkan; Postgres lokal port 5433 sudah pensiun.
+- Aturan: migrasi destruktif / reset / hapus branch = tanya user dulu. Perubahan skema berisiko
+  uji di branch Neon terpisah, bukan langsung di `production`. Jangan log connection string.
 
 ## graphify
 

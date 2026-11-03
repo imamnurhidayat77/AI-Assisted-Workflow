@@ -32,7 +32,7 @@ async function main() {
   try {
     await prisma.$queryRaw`SELECT 1`;
   } catch {
-    console.log('SKIP  DB tidak reachable — jalankan docker compose up -d db dulu');
+    console.log('SKIP  DB tidak reachable — cek DATABASE_URL Neon (`neon env pull`) dulu');
     process.exit(2);
   }
 
@@ -55,6 +55,13 @@ async function main() {
   }
   ok('T1 anti-halusinasi (0 ID asing dari 6 pertanyaan)', invented === 0, `asing: ${invented}`);
 
+  // 1b) Finance live: jawaban menyebut ID invoice yang semuanya ada di DB
+  const dbInvIds = new Set((await prisma.invoice.findMany({ select: { id: true } })).map((i) => i.id));
+  const fin = await chatWithAI('list all open AR invoices with amounts and due dates');
+  const mentioned = [...new Set((JSON.stringify(fin).match(/INV-[A-Z]+-\d+/g) ?? []))];
+  const badInv = mentioned.filter((id) => !dbInvIds.has(id));
+  ok('T1b finance tanpa ID invoice asing', badInv.length === 0 && mentioned.length > 0, `disebut: ${mentioned.length}, asing: ${badInv.length}, dataVia=${fin.dataVia}`);
+
   // 2) Documents API sehat
   const docs = await documents.list();
   ok('T2 documents API mengembalikan daftar', Array.isArray(docs) && docs.length >= 3, `${docs.length} docs`);
@@ -66,14 +73,31 @@ async function main() {
   const nChunks = await ingestDocument(rec.id, storedName);
   ok('T3 ingest fixture menghasilkan chunk', nChunks > 0, `${nChunks} chunks`);
 
+  // T9: agregat sales DB cocok dengan hitungan chat (NZ flat 2300+2300, AU +14.4%).
+  const salesRows = (await prisma.distributorSale.findMany()) as { country: string; quarter: string; units: number }[];
+  const units = (c: string, q: string) => salesRows.filter((r) => r.country === c && r.quarter === q).reduce((a, r) => a + r.units, 0);
+  const nzFlat = units('New Zealand', '2026-Q2') === 2300 && units('New Zealand', '2026-Q3') === 2300;
+  const auQ2 = units('Australia', '2026-Q2');
+  const auQ3 = units('Australia', '2026-Q3');
+  const auGrowth = auQ2 ? ((auQ3 - auQ2) / auQ2) * 100 : 0;
+  ok('T9 agregat sales DB sesuai narasi (NZ flat, AU ~+14%)', nzFlat && Math.abs(auGrowth - 14.4) < 0.5, `NZ ${units('New Zealand', '2026-Q2')}→${units('New Zealand', '2026-Q3')}, AU +${auGrowth.toFixed(1)}%`);
+
   const hits = await retrieveChunks('berapa unit Evaluasi City Cycleway dan kapan briefing?');
   const hitFixture = hits.length > 0 && hits[0].documentId === rec.id;
   ok('T4 retrieval top-1 = dokumen fixture', hitFixture, hits.length ? `${hits[0].fileName} d=${Number(hits[0].distance).toFixed(2)}` : 'no hits');
 
   const r = await chatWithAI('berapa unit Evaluasi City Cycleway dan kapan briefing?');
-  const citesFixture = r.sources.some((s) => s.label === FIXTURE_NAME);
+  // Label sumber live berprefix konteks ("[1] file part #N") sedangkan mock polos —
+  // yang dikontrak adalah sitasi file-nya, bukan format labelnya.
+  const citesFixture = r.sources.some((s) => s.label.includes(FIXTURE_NAME));
   const mentions777 = JSON.stringify(r).includes('777');
   ok('T5 jawaban chat mensitasi fixture + menyebut 777', citesFixture && mentions777, `via=${r.via}`);
+
+  // T10: sales answer grounded on live rows (both regions mentioned, dataVia=db).
+  // Mock mode returns the rule-engine table; live mode the narrative answer — both must cite live data.
+  const sc = await chatWithAI('compare distributor sales New Zealand vs Australia?');
+  const blob = JSON.stringify(sc);
+  ok('T10 jawaban sales live: NZ + AU disebut, dataVia=db', blob.includes('New Zealand') && blob.includes('Australia') && sc.dataVia === 'db', `via=${sc.via}, dataVia=${sc.dataVia}`);
 
   // Cleanup: kembalikan DB + uploads ke kanonis
   await documents.remove(rec.id);

@@ -1,0 +1,389 @@
+{
+  "fixtures": [
+    {
+      "file": "Tender_TND-FX-001.pdf",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-FX-001",
+        "NZ Transport Agency",
+        "24 Nov 2026",
+        "Smartstud"
+      ]
+    },
+    {
+      "file": "Tender_TND-FX-002.pdf",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-FX-002",
+        "Wellington Infrastructure",
+        "03 Dec 2026",
+        "Tunnel markers"
+      ]
+    },
+    {
+      "file": "Tender_TND-FX-003.pdf",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-FX-003",
+        "Christchurch City Council",
+        "15 Dec 2026",
+        "Smartped"
+      ]
+    },
+    {
+      "file": "Tender_TND-FX-004.pdf",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-FX-004",
+        "Brisbane City Council",
+        "08 Jan 2027",
+        "Smartped"
+      ]
+    },
+    {
+      "file": "Tender_TND-FX-005.pdf",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-FX-005",
+        "Norwegian Roads Authority",
+        "19 Jan 2027",
+        "Smartstud"
+      ]
+    },
+    {
+      "file": "Tender_TND-FX-006.pdf",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-FX-006",
+        "Land Transport Authority",
+        "28 Jan 2027",
+        "Tunnel markers"
+      ]
+    },
+    {
+      "file": "Distributor_Sales_NZ_Q3.xlsx",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "NZ",
+        "Auckland Roads Ltd",
+        "SRS-8",
+        "NZD 310000"
+      ]
+    },
+    {
+      "file": "Distributor_Sales_NZ_Q3.csv",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "NZ",
+        "Auckland Roads Ltd",
+        "SRS-8",
+        "NZD 310000"
+      ]
+    },
+    {
+      "file": "Distributor_Sales_AU_Q3.xlsx",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "AU",
+        "Brisbane Traffic Systems",
+        "SP-2",
+        "AUD 120000"
+      ]
+    },
+    {
+      "file": "Distributor_Sales_AU_Q3.csv",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "AU",
+        "Brisbane Traffic Systems",
+        "SP-2",
+        "AUD 120000"
+      ]
+    },
+    {
+      "file": "Distributor_Sales_Pacific_Q3.xlsx",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "Pacific",
+        "Suva Island Works",
+        "TM-4",
+        "FJD 68000"
+      ]
+    },
+    {
+      "file": "Distributor_Sales_Pacific_Q3.csv",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "Pacific",
+        "Suva Island Works",
+        "TM-4",
+        "FJD 68000"
+      ]
+    },
+    {
+      "file": "Quotation_Q-2001.pdf",
+      "kind": "Quotation",
+      "expectValues": [
+        "Q-2001",
+        "NZD 84,500",
+        "TND-FX-001"
+      ]
+    },
+    {
+      "file": "Quotation_Q-2002.pdf",
+      "kind": "Quotation",
+      "expectValues": [
+        "Q-2002",
+        "NZD 41,200",
+        "TND-FX-002"
+      ]
+    },
+    {
+      "file": "Quotation_Q-2003.pdf",
+      "kind": "Quotation",
+      "expectValues": [
+        "Q-2003",
+        "AUD 57,900",
+        "TND-FX-004"
+      ]
+    },
+    {
+      "file": "Quotation_Q-2004.docx",
+      "kind": "Quotation",
+      "expectValues": [
+        "Q-2004",
+        "EUR 33,750",
+        "TND-FX-005"
+      ]
+    },
+    {
+      "file": "Quotation_Q-2005.docx",
+      "kind": "Quotation",
+      "expectValues": [
+        "Q-2005",
+        "SGD 96,000",
+        "TND-FX-006"
+      ]
+    },
+    {
+      "file": "Team_Memo_Oct.pdf",
+      "kind": "General Document",
+      "expectValues": [
+        "October roster freeze",
+        "15 Nov 2026"
+      ]
+    },
+    {
+      "file": "Leave_Policy_2026.docx",
+      "kind": "General Document",
+      "expectValues": [
+        "20 days per year",
+        "10 days per year"
+      ]
+    },
+    {
+      "file": "Site_Notes.csv",
+      "kind": "General Document",
+      "expectValues": [
+        "Depot A",
+        "restock TM-4 before Friday"
+      ]
+    },
+    {
+      "file": "tender_auckland_2026.txt",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-2026-001",
+        "NZ Transport Agency",
+        "24 Nov 2026",
+        "NZD1,250,000",
+        "Smartstud"
+      ]
+    },
+    {
+      "file": "tender_wellington_tunnel.txt",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-2026-002",
+        "Wellington Infrastructure",
+        "03 Dec 2026",
+        "NZD840,000",
+        "Tunnel"
+      ]
+    },
+    {
+      "file": "tender_christchurch_ped.txt",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-2026-003",
+        "Christchurch City Council",
+        "15 Dec 2026",
+        "NZD420,000",
+        "Smartped"
+      ]
+    },
+    {
+      "file": "nzta_brisbane_crossing.txt",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-2026-004",
+        "Brisbane City Council",
+        "08 Jan 2027",
+        "AUD690,000",
+        "Smartped"
+      ]
+    },
+    {
+      "file": "tender_oslo_visibility.txt",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-2026-005",
+        "Norwegian Roads Authority",
+        "19 Jan 2027",
+        "EUR580,000",
+        "Smartstud"
+      ]
+    },
+    {
+      "file": "tender_singapore_guidance.txt",
+      "kind": "Government Tender",
+      "expectValues": [
+        "TND-2026-006",
+        "Land Transport Authority",
+        "28 Jan 2027",
+        "SGD1,100,000",
+        "Tunnel"
+      ]
+    },
+    {
+      "file": "sales_q3_2026.csv",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "Q3 2026",
+        "Smartstud SRS-8",
+        "4820",
+        "22%"
+      ]
+    },
+    {
+      "file": "sales_nz_au.csv",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "Q3 2026",
+        "Smartstud SRS-8",
+        "4820",
+        "22%"
+      ]
+    },
+    {
+      "file": "sales_distributor_q3.csv",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "Q3 2026",
+        "Smartstud SRS-8",
+        "4820",
+        "22%"
+      ]
+    },
+    {
+      "file": "sales_pacific.xlsx",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "Q3 2026",
+        "Smartstud SRS-8",
+        "4820",
+        "22%"
+      ]
+    },
+    {
+      "file": "sales_annual.xlsx",
+      "kind": "Distributor Sales",
+      "expectValues": [
+        "Q3 2026",
+        "Smartstud SRS-8",
+        "4820",
+        "22%"
+      ]
+    },
+    {
+      "file": "Smartstud_Quotation_1042.txt",
+      "kind": "Quotation",
+      "expectValues": [
+        "Q-1042",
+        "NZD84,500",
+        "TND-2026-001"
+      ]
+    },
+    {
+      "file": "quotation_wellington_2071.txt",
+      "kind": "Quotation",
+      "expectValues": [
+        "Q-2071",
+        "NZD132,000",
+        "TND-2026-002"
+      ]
+    },
+    {
+      "file": "quotation_brisbane_3090.txt",
+      "kind": "Quotation",
+      "expectValues": [
+        "Q-3090",
+        "AUD96,750",
+        "TND-2026-004"
+      ]
+    },
+    {
+      "file": "quotation_oslo_4110.txt",
+      "kind": "Quotation",
+      "expectValues": [
+        "Q-4110",
+        "EUR58,200",
+        "TND-2026-005"
+      ]
+    },
+    {
+      "file": "quotation_spot_5001.txt",
+      "kind": "Quotation",
+      "expectValues": [
+        "Q-5001",
+        "NZD12,300",
+        "TND-2026-003"
+      ]
+    },
+    {
+      "file": "meeting_notes_oct.txt",
+      "kind": "General Document",
+      "expectValues": [
+        "Isaac"
+      ]
+    },
+    {
+      "file": "misc_log.csv",
+      "kind": "General Document",
+      "expectValues": [
+        "stocktake"
+      ]
+    },
+    {
+      "file": "ocr_quotation_1042.png",
+      "kind": "ocr",
+      "ocr": true,
+      "expectTextContains": [
+        "Q-1042",
+        "84500",
+        "Auckland"
+      ]
+    },
+    {
+      "file": "ocr_tender_notice.png",
+      "kind": "ocr",
+      "ocr": true,
+      "expectTextContains": [
+        "TND-2026-002",
+        "Wellington",
+        "840000"
+      ]
+    }
+  ],
+  "note": "SIMULATED data, not real company data."
+}

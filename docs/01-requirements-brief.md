@@ -4,7 +4,7 @@
 **Organisation:** Smart City Street Ltd, NZ
 **Period:** 16 November 2026 – 5 February 2027 (10 weeks)
 **Author:** Imam Nurhidayat (ICT Internship, Innovation NZ)
-**Status:** Living document — v1.0
+**Status:** Living document — v1.1 (human-in-the-loop drafts, approval queue, realtime)
 
 ---
 
@@ -25,10 +25,11 @@ of selected routine tasks.
 
 | # | Objective | Mapped feature(s) |
 |---|-----------|-------------------|
-| O1 | Extract & structure information from documents | Document ingestion → upload, processing queue, structured extraction preview (`/documents`, `GET /api/documents/:id/extract`) |
+| O1 | Extract & structure information from documents | Document ingestion → upload, processing queue, structured extraction preview with per-field confidence (`/documents`, `GET /api/documents/:id/extract`) |
 | O2 | Make information easier to search | AI chat grounded on live tender data (`/conversation`, `POST /api/chat`), database explorer (`/data`) |
 | O3 | Produce useful reports | Tender reports + KPI (`/reports`, `GET /api/reports/summary`) |
 | O4 | Automate selected routine tasks | Jobs & automations (`/jobs`): deadline monitoring, sales import, weekly summaries |
+| O5 | AI drafts, humans decide | Human-in-the-loop draft lifecycle: AI/suggested content → editable draft → authenticated approval (`/conversation` Draft Card, `/documents` review, `/jobs` approval queue, `POST /api/drafts/:id/approve`) |
 
 ## 3. Stakeholders & Users
 
@@ -36,9 +37,11 @@ of selected routine tasks.
 |---|---|
 | Operations staff (e.g. Isaac Ngatai, persona) | Prioritise tenders, track deadlines, find quotations awaiting approval |
 | Management | Pipeline analytics by country, success rate, monthly performance |
+| Approver (any role) | Review AI drafts, correct fields, approve/reject with their name recorded |
 | IT / handover recipient | Clean codebase, docs, reproducible local setup |
 
-> Prototype assumes a **single demo user**; multi-user auth is out of scope (see §7).
+> Demo login provides switchable personas (`GET /api/auth/users`, profile menu);
+> consequential decisions are recorded under the signed-in name. SSO/OAuth before production (see §7).
 
 ## 4. Functional Requirements
 
@@ -52,8 +55,10 @@ of selected routine tasks.
 ### 4.2 Document Ingestion & Extraction
 - **FR-06** Upload PDF/XLSX/XLS/CSV/DOCX (max 50 MB) via picker or drag-drop; unsupported types rejected.
 - **FR-07** Each file gets a processing status (`Processing` → `Processed`/`Completed`) visible in the queue with polling.
-- **FR-08** Each document exposes a **structured extraction preview** (document kind, confidence, key fields).
+- **FR-08** Each document exposes a **structured extraction preview** (document kind, overall confidence, key fields). Each field carries `confidence 0..1` + `source` (`extracted` = read directly, `inferred` = AI-completed from context, `missing` = not found) + `needsReview` flag; absent data is listed under `missingFields`.
+- **FR-08b** Extraction uses the LLM provider when `EXTRACT_PROVIDER=http` (+ `LLM_*` configured); otherwise deterministic simulation. LLM output is validated/clamped server-side; any failure falls back to simulation — the preview never breaks.
 - **FR-09** Documents can be deleted (metadata + stored file).
+- **FR-09b** Human corrects extraction values inline; corrected values flow into the draft body when "Buat draft dari hasil ini" is used (with `sourceDocumentId/Name` link).
 
 ### 4.3 Data Management
 - **FR-10** Tender records stored in Postgres (Prisma) with full CRUD-ready model; list + search API (`GET /api/tenders?q=`).
@@ -62,7 +67,13 @@ of selected routine tasks.
 
 ### 4.4 Reports & Operations
 - **FR-13** Tender analytics: KPIs (total, pipeline value, success rate, closing soon), monthly performance chart, pipeline-by-country split.
-- **FR-14** Jobs view lists automations with trigger, last run, progress; system status + alerts views for operational health.
+- **FR-14** Jobs view lists automations with trigger, last run, progress; drafts awaiting human decision appear on top with inline Approve/Reject; decided drafts move to a permanent Decision History section. Jobs page khusus operations + management. (System status + alerts views dihapus — mock tanpa API.)
+
+### 4.5 Human-in-the-Loop Drafts (AI drafter, human decider)
+- **FR-15** AI output that matters is materialised as an editable **Draft** (`draft → in_review → approved / rejected`; `rejected → draft` to reopen). Approved drafts are locked against silent edits.
+- **FR-16** Consequential transitions (`submit/approve/reject/reopen`) require an authenticated user; `decidedBy` comes from the session (never from the request body) with `decidedAt` timestamp + append-only `history`.
+- **FR-17** Approved drafts surface in Spaces as saved workspace decisions (with source document link where applicable).
+- **FR-18** Draft changes broadcast over Socket.IO (`draft:changed {id, status}` — no body); REST stays the source of truth, realtime is best-effort with manual Refresh fallback.
 
 ## 5. Non-Functional Requirements
 
@@ -77,18 +88,19 @@ of selected routine tasks.
 
 ## 6. Acceptance Criteria (demo script)
 
-1. Upload a tender PDF → status flips to `Processed` → extraction preview shows tender fields.
+1. Upload a tender PDF → status flips to `Processed` → extraction preview shows tender fields with confidence/source badges + missing fields.
 2. Ask "Brisbane crossing" → card `TND-2026-004` appears with `X-Data-Via: db`.
 3. Insert a tender directly in DB → chat surfaces it without code changes.
 4. Kill Postgres → chat + documents still respond (fallback).
 5. `npm run build` passes for `apps/web` and `apps/api`.
+6. Create draft from a document → appears in `/jobs` queue (realtime) → approve as signed-in user → locked, recorded in Decision History + Spaces, survives API restart.
+7. Approve without API key → `401`; approve with spoofed `decidedBy` in body → session name recorded instead.
 
 ## 7. Out of Scope (v1)
 
-- Real LLM API key / paid inference (provider interface ready, `AI_PROVIDER=http`).
-- Multi-user auth, roles, audit log.
-- True PDF parsing/OCR and vector search (extraction is deterministic simulation; RAG is keyword grounding).
-- Production deployment, backups, monitoring.
+- Paid inference by default (mock-first; set `AI_PROVIDER=http` / `EXTRACT_PROVIDER=http` + `LLM_*` for real models).
+- SSO/OAuth (demo-login only), per-row data permissions, production deployment, backups, monitoring.
+- True OCR for scanned PDFs (text parse only; barely-legible values stay `inferred`/`missing` for humans).
 
 ## 8. Risks & Mitigations
 
@@ -96,7 +108,7 @@ of selected routine tasks.
 |---|---|
 | No real company data available | Deterministic simulation data mirroring real shapes; documented as ground truth for evaluation |
 | AI hallucinations undermine trust | ID validation against DB; provenance headers; disclaimer in UI |
-| Port/environment conflicts on demo machine | Dockerised Postgres on 5433; mock fallbacks at every layer |
+| Port/environment conflicts on demo machine | Postgres Neon (managed, tanpa docker lokal); mock fallbacks at every layer |
 
 ## 9. Traceability to Agreement Deliverables
 

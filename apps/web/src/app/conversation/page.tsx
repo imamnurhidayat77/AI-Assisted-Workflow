@@ -1,14 +1,59 @@
 'use client';
 
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { Shell } from '@/components/layout/Shell';
 import { Button, Composer, Icon, Input, Status, Textarea } from '@/components/ui/primitives';
-import { api } from '@/lib/api';
+import { api, getStoredKey } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { getSessionId, getSocket } from '@/lib/socket';
 import { useToast } from '@/lib/store';
-import { ASSISTANTS, buildDraftFromChat, mockChatAnswer, tenders, type ChatResponse, type Draft, type DraftKind } from '@street-smart/shared';
+import { allowedAssistants, ASSISTANTS, canUseAssistant, parseDraftBody, renderDraftBody, resolveAssistant, templateRefsFromSources, tenders, type ChatResponse, type Draft, type DraftKind, type SpaceSummary } from '@street-smart/shared';
+
+/** Kartu dokumen terstruktur ala Joule: seksi bernomor, tabel, footer —
+ * di-parse dari body template (## heading, - bullet, | tabel |, --- footer). */
+function DocPreview({ body }: { body: string }) {
+  const sections = parseDraftBody(body);
+  let n = 0;
+  return <div className="doc-preview">
+    {sections.map((s, i) => {
+      if (s.footer) return <div key={i} className="doc-footer">{s.paragraphs.map((p, j) => <p key={j}>{p}</p>)}</div>;
+      const num = s.heading ? ++n : n;
+      return <div key={i} className="doc-section">
+        {s.heading && <div className="doc-heading"><span className="doc-num">{num}</span><span>{s.heading}</span></div>}
+        {s.paragraphs.map((p, j) => <p key={j} className="answer-copy">{p}</p>)}
+        {s.bullets.length > 0 && <ul className="doc-bullets">{s.bullets.map((b, j) => <li key={j}>{b}</li>)}</ul>}
+        {s.table && <div className="table-scroll"><table><thead><tr>{s.table.head.map((h, j) => <th key={j}>{h}</th>)}</tr></thead>
+          <tbody>{s.table.rows.map((r, j) => <tr key={j}>{r.map((c, k) => <td key={k}>{c}</td>)}</tr>)}</tbody></table></div>}
+      </div>;
+    })}
+  </div>;
+}
+
+/** Jawaban "ditolak" — dipakai saat assistant di luar role user (server 403 atau offline). */
+function deniedAnswer(assistantName: string, role: string): ChatResponse {
+  return {
+    answerTitle: 'Not available for your role',
+    answerCopy: `The ${assistantName} serves a different team — you are signed in as ${role}, so this question was not answered. Pick one of your assistants above or rephrase within your scope.`,
+    tenderIds: [],
+    recommendation: 'Use the assistant dropdown to see exactly what your role may access.',
+    sources: [],
+    followUps: [],
+  };
+}
+
+/** Jawaban error eksplisit saat API/DB mati — tanpa narasi simulasi yang mengarang. */
+function offlineAnswer(): ChatResponse {
+  return {
+    answerTitle: 'Answer unavailable — API unreachable',
+    answerCopy: 'The API or database could not be reached, so this question was not answered and nothing was saved. Check the connection and send again.',
+    tenderIds: [],
+    recommendation: '',
+    sources: [],
+    followUps: ['Retry now', 'Open Database explorer', 'Check System status'],
+  };
+}
 
 function draftTone(s: Draft['status']): 'gray' | 'blue' | 'green' | 'red' | 'amber' {
   if (s === 'approved') return 'green';
@@ -17,11 +62,65 @@ function draftTone(s: Draft['status']): 'gray' | 'blue' | 'green' | 'red' | 'amb
   return 'gray';
 }
 
+/** Assistant dropdown — opsi dibatasi ke role user (server tetap enforcement final). */
+function AssistantPicker({ assistantId, setAssistantId }: { assistantId: string; setAssistantId: (v: string) => void }) {
+  const { user, ready } = useAuth();
+  const options = user ? allowedAssistants(user.role) : ASSISTANTS;
+  useEffect(() => {
+    if (ready && assistantId !== 'auto' && !options.some((a) => a.id === assistantId)) {
+      setAssistantId('auto');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, user?.role]);
+  return <select aria-label="Choose assistant" value={assistantId} onChange={(e) => setAssistantId(e.target.value)} style={{ marginTop: 8 }}
+    title={user ? `Signed in as ${user.name} (${user.role})` : 'Sign in via the profile menu'}>
+    <option value="auto">Auto (match question)</option>
+    {options.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.tagline}</option>)}
+  </select>;
+}
+
+interface Turn {
+  q: string;
+  a: ChatResponse;
+}
+
+interface ThreadMsg {
+  id: string;
+  role: string;
+  content: string;
+  answer?: ChatResponse;
+}
+
+/** Compact rendering for older turns (latest turn keeps the full workspace UI).
+ * Sengaja TANPA wrapper .conversation-feed — itu scroll-container flex:1; dipakai per-turn
+ * membuat teks dan recommendation kepotong (bug: jawaban lama terklip). */
+function PastTurn({ turn, initials }: { turn: Turn; initials: string }) {
+  const cards = tenders.filter((t) => (turn.a.tenderIds ?? []).includes(t.id)).slice(0, 3);
+  const name = ASSISTANTS.find((a) => a.id === turn.a.assistantId)?.name ?? 'Street Smart AI';
+  return <>
+    <div className="message-user"><div className="user-avatar">{initials}</div><div><div className="message-label">You</div><div className="user-bubble">{turn.q}</div></div></div>
+    <div className="message-ai"><div className="ai-mark small"><Icon name="spark" /></div>
+      <div className="ai-response">
+        <div className="message-label">{name}</div>
+        <div className="answer-title">{turn.a.answerTitle}</div>
+        <div className="answer-copy">{turn.a.answerCopy}</div>
+        {cards.length > 0 && <div className="tender-cards">
+          {cards.map((tender, index) => <div className="tender-card" key={tender.id}><div className="tender-rank">0{index + 1}</div><div className="tender-top"><div><div className="tender-name">{tender.name}</div><div className="tender-agency">{tender.agency}</div></div></div><div className="tender-stats"><div><span>Estimated value</span><strong>{tender.value}</strong></div><div><span>Closes</span><strong>{tender.date}</strong></div><div><span>Product fit</span><strong>{tender.product}</strong></div></div></div>)}
+        </div>}
+        {turn.a.recommendation && <div className="recommendation"><div className="recommendation-icon"><Icon name="spark" /></div><div><div className="recommendation-title">AI recommendation</div><div>{turn.a.recommendation}</div></div></div>}
+      </div>
+    </div>
+  </>;
+}
+
 function Body() {
   const search = useSearchParams();
+  const router = useRouter();
+  const { user: sessionUser } = useAuth();
   const initial = search.get('q') || '';
+  const initialConv = search.get('c') || '';
   const { toast } = useToast();
-  const [started, setStarted] = useState(Boolean(initial));
+  const [started, setStarted] = useState(Boolean(initial || initialConv));
   const [prompt, setPrompt] = useState('');
   const [question, setQuestion] = useState(initial);
   const [thinking, setThinking] = useState(false);
@@ -30,13 +129,31 @@ function Body() {
   const [realtime, setRealtime] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [assistantId, setAssistantId] = useState<string>('auto');
-  const [answer, setAnswer] = useState<ChatResponse>(() => mockChatAnswer(initial));
+  const [convId, setConvId] = useState<string | null>(initialConv || null);
+  const [past, setPast] = useState<Turn[]>([]);
+  // State awal netral (bukan narasi mock) — terisi jawaban asli setelah ask() selesai.
+  const [answer, setAnswer] = useState<ChatResponse>(() => ({
+    answerTitle: initial ? 'Thinking…' : 'Start a new conversation',
+    answerCopy: '',
+    tenderIds: [],
+    recommendation: '',
+    sources: [],
+    followUps: [],
+  }));
+  // Tandai bila sudah ada 1 exchange sungguhan — dipakai untuk memindahkan turn lama ke riwayat.
+  const answeredRef = useRef(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftBody, setDraftBody] = useState('');
+  const [docPreview, setDocPreview] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const ask = async (message: string) => {
+    // Pindahkan turn aktif ke riwayat sebelum mulai yang baru (bukan pada pesan pertama).
+    if (answeredRef.current && question) {
+      const prev: Turn = { q: question, a: answer };
+      setPast((p) => [...p, prev]);
+    }
     setPrompt('');
     setThinking(true);
     setStage(null);
@@ -45,56 +162,113 @@ function Body() {
     setStarted(true);
     setDraft(null);
     const activeAssistant = assistantId === 'auto' ? undefined : assistantId;
-    const fallback = mockChatAnswer(message, activeAssistant);
-    const apply = (res: ChatResponse & { tenders?: typeof tenders; via?: 'mock' | 'http' }) => {
-      setVia(res.via ?? 'mock');
-      if (res.assistantId) setAssistantId(res.assistantId);
-      setAnswer({ answerTitle: res.answerTitle, answerCopy: res.answerCopy, tenderIds: res.tenderIds, recommendation: res.recommendation, sources: res.sources, followUps: res.followUps, assistantId: res.assistantId, skillsUsed: res.skillsUsed });
+    // Fallback offline WAJIB konsisten role: resolve seperti server, tolak bila di luar role.
+    // Tanpa ini, mock lokal bisa membocorkan jawaban lintas-role saat API mati.
+    const roleGate = (() => {
+      if (!sessionUser) return { denied: false, assistant: activeAssistant } as const;
+      const resolved = resolveAssistant({ assistantId: activeAssistant, role: sessionUser.role, message });
+      if (!canUseAssistant(sessionUser.role, resolved.id)) return { denied: true, assistant: resolved.id } as const;
+      return { denied: false, assistant: resolved.id } as const;
+    })();
+    const roleName = sessionUser?.role ?? 'general';
+    const deniedName = ASSISTANTS.find((a) => a.id === (roleGate.denied ? roleGate.assistant : activeAssistant))?.name ?? 'requested assistant';
+    // Fallback HANYA untuk kasus offline/error: jawaban error eksplisit, bukan narasi simulasi.
+    // Kasus denied tetap pesan akses (bukan data) — tidak mengarang isi jawaban.
+    const fallback = roleGate.denied ? deniedAnswer(deniedName, roleName) : offlineAnswer();
+    const showDenied = () => {
+      setAnswer(deniedAnswer(deniedName, roleName));
+      answeredRef.current = true;
       setThinking(false);
       setStage(null);
     };
+    const apply = (res: ChatResponse & { tenders?: typeof tenders; via?: 'mock' | 'http'; conversationId?: string | null }) => {
+      setVia(res.via ?? 'mock');
+      if (res.assistantId) setAssistantId(res.assistantId);
+      const full: ChatResponse = { answerTitle: res.answerTitle, answerCopy: res.answerCopy, tenderIds: res.tenderIds, recommendation: res.recommendation, sources: res.sources, followUps: res.followUps, assistantId: res.assistantId, skillsUsed: res.skillsUsed };
+      // Lanjutkan thread bila server mengembalikan id (persist aktif); tanpa id → mode sekali-jawab.
+      if (res.conversationId) {
+        setConvId(res.conversationId);
+        try {
+          router.replace(`/conversation?c=${encodeURIComponent(res.conversationId)}`);
+        } catch { /* abaikan */ }
+      }
+      setAnswer(full);
+      answeredRef.current = true;
+      setThinking(false);
+      setStage(null);
+    };
+    const cid = convId ?? undefined;
     // 1) Realtime Socket.IO (streams chat:stage progress + chat:answer). 2) POST fallback.
     try {
       const s = await getSocket(2500);
       if (s) {
         const onStage = (st: { stage: string }) => setStage(st.stage);
-        const done = await new Promise<ChatResponse & { via?: 'mock' | 'http' } | null>((resolve) => {
+        const done = await new Promise<ChatResponse & { via?: 'mock' | 'http'; conversationId?: string | null } | null>((resolve) => {
           const timer = setTimeout(() => resolve(null), 70000);
           s.once('chat:answer', (res) => { clearTimeout(timer); resolve(res); });
           s.once('chat:error', () => { clearTimeout(timer); resolve(null); });
           s.on('chat:stage', onStage);
-          s.emit('chat:message', { message, sessionId: getSessionId(), ...(activeAssistant ? { assistantId: activeAssistant } : {}) });
+          s.emit('chat:message', { message, sessionId: getSessionId(), apiKey: getStoredKey(), ...(activeAssistant ? { assistantId: activeAssistant } : {}), ...(cid ? { conversationId: cid } : {}) });
         });
         s.off('chat:stage', onStage);
         if (done) { setRealtime(true); apply(done); return; }
       }
     } catch { /* fall through to POST */ }
-    const res = await api.post<(ChatResponse & { tenders?: typeof tenders; via?: 'mock' | 'http' })>(
-      '/api/chat',
-      activeAssistant ? { message, assistantId: activeAssistant, sessionId: getSessionId() } : { message, sessionId: getSessionId() },
-      { ...fallback, via: 'mock' as const },
-    );
-    apply(res);
+    // Direct fetch (bukan api.post): 403 role HARUS tampil sebagai denied,
+    // bukan ditutup fallback mock. Error lain/offline → fallback konsisten-role di atas.
+    try {
+      const r = await fetch(`${api.base}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(getStoredKey() ? { 'X-API-Key': getStoredKey() } : {}) },
+        body: JSON.stringify({ message, sessionId: getSessionId(), ...(activeAssistant ? { assistantId: activeAssistant } : {}), ...(cid ? { conversationId: cid } : {}) }),
+      });
+      const json = (await r.json().catch(() => null)) as (ChatResponse & { tenders?: typeof tenders; via?: 'mock' | 'http'; conversationId?: string | null }) | null;
+      if (r.ok && json) {
+        apply(json);
+        return;
+      }
+      if (r.status === 403) {
+        showDenied();
+        return;
+      }
+    } catch { /* offline → fallback di bawah */ }
+    apply({ ...fallback, via: 'mock' as const });
   };
   const send = () => { if (prompt.trim()) ask(prompt); };
 
-  // AI drafts, humans decide. API failure → local draft (still editable).
+  // AI drafts, humans decide. Isi draft memakai template baku per kind
+  // (renderDraftBody) dengan fakta dari kartu tender live. API failure → error eksplisit.
   const newDraft = async (kind: DraftKind) => {
+    const factFor = (id: string): string => {
+      const t = [...shown, ...tenders].find((x) => x.id === id);
+      return t ? `${t.id} — ${t.name} (${t.agency}, ${t.value}, closes ${t.date}, ${t.status})` : id;
+    };
     const payload = {
       kind,
       title: answer.answerTitle || `Draft for: ${question.slice(0, 60)}`,
-      body: [answer.answerCopy, answer.recommendation ? `Recommendation: ${answer.recommendation}` : ''].filter(Boolean).join('\n\n'),
+      body: renderDraftBody(kind, {
+        summary: answer.answerCopy,
+        facts: (answer.tenderIds ?? []).map(factFor),
+        recommendation: answer.recommendation,
+        sources: answer.sources ?? [],
+        assistantName: ASSISTANTS.find((a) => a.id === answer.assistantId)?.name,
+        templateRefs: templateRefsFromSources(answer.sources),
+      }),
       assistantId: answer.assistantId,
       skillsUsed: answer.skillsUsed ?? [],
       sources: answer.sources ?? [],
       tenderIds: answer.tenderIds ?? [],
     };
-    const fallback = buildDraftFromChat(question || 'conversation', answer, kind);
-    const created = await api.post<Draft>('/api/drafts', payload, fallback);
+    const created = await api.post<Draft | null>('/api/drafts', payload, null);
+    if (!created) {
+      toast('Draft tidak tersimpan — API/database tidak terjangkau. Periksa koneksi lalu coba lagi.');
+      return;
+    }
     setDraft(created);
     setDraftTitle(created.title);
     setDraftBody(created.body);
-    toast(created.id.startsWith('local-') ? 'Local draft created (API offline) — still editable' : 'Draft created — please review & approve');
+    setDocPreview(true);
+    toast('Draft created — please review & approve');
   };
 
   const saveEdits = async () => {
@@ -107,52 +281,115 @@ function Body() {
     toast('Draft edits saved');
   };
 
+  // decidedBy diambil dari sesi login (server, anti-spoofing) — bukan dari body.
+  // Ganti user via menu profil di Shell. Tanpa login, API fallback ke 'you'.
   const moveDraft = async (action: 'submit' | 'approve' | 'reject' | 'reopen') => {
     if (!draft) return;
     setSaving(true);
     const nextStatus = action === 'submit' ? 'in_review' : action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'draft';
     const fallback: Draft = { ...draft, status: nextStatus, updatedAt: new Date().toISOString() };
-    const updated = await api.post<Draft>(`/api/drafts/${draft.id}/${action}`, { decidedBy: 'you' }, fallback);
+    const updated = await api.post<Draft>(`/api/drafts/${draft.id}/${action}`, {}, fallback);
     setDraft(updated);
     setDraftTitle(updated.title);
     setDraftBody(updated.body);
     setSaving(false);
-    toast(action === 'approve' ? 'Draft approved — decision recorded under your name' : action === 'reject' ? 'Draft rejected — reopen & fix it' : action === 'submit' ? 'Draft submitted for review' : 'Draft reopened');
+    toast(action === 'approve' ? `Draft approved — recorded under ${updated.decidedBy ?? sessionUser?.name ?? 'you'}` : action === 'reject' ? 'Draft rejected — reopen & fix it' : action === 'submit' ? 'Draft submitted for review' : 'Draft reopened');
   };
 
   const shown = tenders.filter((t) => answer.tenderIds.includes(t.id)).slice(0, 3);
   const title = !started ? 'New conversation' : question.length > 64 ? `${question.slice(0, 64)}…` : question;
 
-  // Tanya ke API saat halaman dibuka dengan ?q= — sebelumnya hanya mock lokal yang tampil.
+  // Save to Space — picker popover, lalu simpan Q&A ini sebagai item conversation.
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [spaceList, setSpaceList] = useState<SpaceSummary[]>([]);
+  const [savingSpace, setSavingSpace] = useState(false);
+  const openSavePicker = async () => {
+    setSaveOpen((v) => !v);
+    const rows = await api.get<SpaceSummary[] | null>('/api/spaces', null);
+    setSpaceList(rows ?? []);
+    if (!rows) toast('Spaces tidak termuat — API/database tidak terjangkau');
+  };
+  const saveToSpace = async (spaceId: string, spaceName: string) => {
+    setSavingSpace(true);
+    const created = await api.post(`/api/spaces/${spaceId}/items`, {
+      kind: 'conversation',
+      refId: question,
+      title: question.length > 120 ? `${question.slice(0, 120)}…` : question,
+      preview: answer.answerTitle,
+    }, null);
+    setSavingSpace(false);
+    setSaveOpen(false);
+    toast(created ? `Saved to "${spaceName}"` : 'Could not save — sign in first or check the API');
+  };
+
+  // Muat thread tersimpan (?c=) atau tanya baru (?q=) saat halaman dibuka.
   const askedRef = useRef(false);
   useEffect(() => {
-    if (initial && !askedRef.current) {
-      askedRef.current = true;
-      ask(initial);
+    if (askedRef.current) return;
+    askedRef.current = true;
+    if (initialConv) {
+      (async () => {
+        try {
+          const res = await fetch(`${api.base}/api/conversations/${encodeURIComponent(initialConv)}`, { headers: { 'X-API-Key': getStoredKey() } });
+          if (!res.ok) return;
+          const thread = (await res.json()) as { title: string; messages: ThreadMsg[]; assistantId?: string };
+          const turns: Turn[] = [];
+          let pendingQ = '';
+          for (const m of thread.messages ?? []) {
+            if (m.role === 'user') {
+              // Pesan user tanpa balasan AI (mis. request terputus) dilepas —
+              // jangan fabrikasi jawaban agar thread tidak berisi data karangan.
+              pendingQ = m.content;
+            } else if (m.role === 'assistant' && pendingQ) {
+              turns.push({ q: pendingQ, a: (m as ThreadMsg & { answer?: ChatResponse }).answer ?? { answerTitle: '', answerCopy: m.content, tenderIds: [], recommendation: '', sources: [], followUps: [] } });
+              pendingQ = '';
+            }
+          }
+          if (turns.length) {
+            const last = turns[turns.length - 1];
+            setPast(turns.slice(0, -1));
+            answeredRef.current = true;
+            setStarted(true);
+            setQuestion(last.q);
+            setAnswer(last.a);
+            if (last.a.assistantId) setAssistantId(last.a.assistantId);
+          } else if (pendingQ) {
+            // Thread hanya berisi pertanyaan tanpa jawaban (request terputus):
+            // tampilkan pertanyaannya + saran kirim ulang, tanpa jawaban karangan.
+            setPast([]);
+            answeredRef.current = false;
+            setStarted(true);
+            setQuestion(pendingQ);
+            setAnswer({ ...offlineAnswer(), answerTitle: 'Reply not saved — please resend' });
+          }
+          if (thread.assistantId) setAssistantId(thread.assistantId);
+        } catch { /* fallback: tampilan kosong, user bisa tanya baru */ }
+      })();
+      return;
     }
+    if (initial) ask(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const locked = draft?.status === 'approved' || draft?.status === 'rejected';
+  const initials = (sessionUser?.name ?? 'You').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   const activeAssistantName = ASSISTANTS.find((a) => a.id === (answer.assistantId ?? (assistantId === 'auto' ? 'sales-assistant' : assistantId)))?.name ?? 'Sales Assistant';
   const STAGE_ORDER = ['tenders', 'docs', 'ai'] as const;
   const STAGE_LABEL: Record<string, string> = { tenders: 'Searching tender database', docs: 'Reading relevant documents', ai: 'Generating answer' };
   const stageIdx = stage ? STAGE_ORDER.indexOf(stage as (typeof STAGE_ORDER)[number]) : -1;
   return <div className="conversation-shell">
     <div className="conversation-header"><div><div className="conversation-title">{title}</div><div className="conversation-meta">{started ? `${activeAssistantName} · Updated just now` : 'Street Smart AI · Ready when you are'} · {via === 'http' ? 'Live AI' : 'Simulated answer'}{started && realtime ? ' · Realtime' : ''}</div>
-      <select aria-label="Choose assistant" value={assistantId} onChange={(e) => setAssistantId(e.target.value)} style={{ marginTop: 8 }}>
-        <option value="auto">Auto (match question)</option>
-        {ASSISTANTS.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.tagline}</option>)}
-      </select></div>
-      {started && <div className="header-actions"><Button icon="grid" onClick={() => toast('Conversation saved to Tender Opportunity Review')}>Save to Space</Button><Button icon="more" variant="icon" title="More actions" onClick={() => toast('Conversation options opened')} /></div>}</div>
+      <AssistantPicker assistantId={assistantId} setAssistantId={setAssistantId} /></div>
+      {started && <div className="header-actions"><div className="notification-wrap"><Button icon="grid" onClick={openSavePicker}>Save to Space</Button>{saveOpen && <div className="notification-popover" style={{ width: 280, right: 0 }}><div className="popover-title">Save to Space{savingSpace ? ' — saving…' : ''}</div>{spaceList.map((s) => <button key={s.id} className="nav-item" style={{ width: '100%' }} onClick={() => saveToSpace(s.id, s.name)}><Icon name="grid" /><span>{s.name}</span></button>)}</div>}</div><Button icon="more" variant="icon" title="More actions" onClick={() => toast('Conversation options opened')} /></div>}</div>
     {!started ? <div className="conversation-empty">
       <div className="ai-mark"><Icon name="spark" size={24} /></div>
       <div className="hero-title">Start a new conversation</div>
       <div className="hero-subtitle">Ask about tenders, sales, products, quotations, or operations.</div>
-      <div className="empty-composer"><Composer value={prompt} setValue={setPrompt} onSend={send} /></div>
+      <div className="empty-composer"><Composer value={prompt} setValue={setPrompt} onSend={send} mentionOptions={(sessionUser ? allowedAssistants(sessionUser.role) : []).map((a) => ({ id: a.id, name: a.name, tagline: a.tagline }))} mentionValue={assistantId} onMention={setAssistantId} /></div>
     </div> : <>
     <div className="conversation-feed">
-      <div className="message-user"><div className="user-avatar">IN</div><div><div className="message-label">You</div><div className="user-bubble">{question}</div></div></div>
+      {past.map((t, i) => <PastTurn key={i} turn={t} initials={initials} />)}
+      <div className="message-user"><div className="user-avatar">{initials}</div><div><div className="message-label">You</div><div className="user-bubble">{question}</div></div></div>
       {thinking ? <div className="thinking-card"><div className="ai-mark small"><Icon name="spark" /></div><div><div className="thinking-title">Analyzing your business data{realtime ? ' · live' : ''}</div><div className="thinking-steps">{STAGE_ORDER.map((key, i) => {
         const state = stageIdx < 0 ? (i === 0 ? 'active' : 'todo') : i < stageIdx ? 'done' : i === stageIdx ? 'active' : 'todo';
         return state === 'done'
@@ -173,10 +410,13 @@ function Body() {
           <div className="recommendation"><div className="recommendation-icon"><Icon name="spark" /></div><div><div className="recommendation-title">AI recommendation</div><div>{answer.recommendation}</div></div></div>
           <div className="action-row"><Link className="btn btn-primary" href="/data">Open tender pipeline</Link><Button onClick={() => newDraft('tender-brief')}>Prepare tender brief</Button><Button onClick={() => newDraft('approval-summary')}>Draft approval summary</Button></div>
           {draft && <div className="table-card" style={{ marginTop: 12 }}>
-            <div className="table-toolbar"><div><div className="table-title">Draft — humans always decide</div><div className="table-subtitle">{draft.kind} · {draft.assistantId ?? 'ai'} · {draft.history.length} history entries</div></div><Status tone={draftTone(draft.status)}>{draft.status}</Status></div>
-            <div style={{ display: 'grid', gap: 8 }}>
+            <div className="table-toolbar"><div className="doc-card-head"><span className="doc-card-icon"><Icon name="file" size={18} /></span><div><div className="table-title">{draft.kind.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')}</div><div className="table-subtitle">{draft.assistantId ?? 'ai'} · {draft.history.length} history entries</div></div></div><div className="toolbar-actions"><div className="segmented" role="group" aria-label="Draft view"><button className={docPreview ? 'on' : ''} onClick={() => setDocPreview(true)}>Preview</button><button className={!docPreview ? 'on' : ''} onClick={() => setDocPreview(false)}>Edit</button></div><Status tone={draftTone(draft.status)}>{draft.status}</Status></div></div>
+            {docPreview ? <DocPreview body={draftBody} /> : <div style={{ display: 'grid', gap: 8 }}>
               <label style={{ display: 'grid', gap: 4 }}><span className="table-subtitle">Title (editable)</span><Input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} disabled={locked || saving} /></label>
               <label style={{ display: 'grid', gap: 4 }}><span className="table-subtitle">Draft body (editable)</span><Textarea value={draftBody} onChange={(e) => setDraftBody(e.target.value)} rows={6} disabled={locked || saving} /></label>
+            </div>}
+            <div style={{ display: 'grid', gap: 8, marginTop: docPreview ? 12 : 0 }}>
+              <div className="table-subtitle">Decide as {sessionUser ? `${sessionUser.name} (${sessionUser.role})` : 'you (login via profile menu)'} — recorded in audit.</div>
               <div className="action-row">
                 <Button variant="secondary" onClick={saveEdits} disabled={locked || saving}>{saving ? 'Saving…' : 'Save edits'}</Button>
                 {draft.status === 'draft' && <Button variant="primary" onClick={() => moveDraft('submit')} disabled={saving}>Submit for review</Button>}
@@ -194,7 +434,7 @@ function Body() {
         </div>
       </div>}
     </div>
-    <div className="conversation-composer"><Composer value={prompt} setValue={setPrompt} onSend={send} compact /><div className="disclaimer">AI drafts content — humans always make the final call. Review before approving.</div></div>
+    <div className="conversation-composer"><Composer value={prompt} setValue={setPrompt} onSend={send} compact mentionOptions={(sessionUser ? allowedAssistants(sessionUser.role) : []).map((a) => ({ id: a.id, name: a.name, tagline: a.tagline }))} mentionValue={assistantId} onMention={setAssistantId} /><div className="disclaimer">AI drafts content — humans always make the final call. Review before approving.</div></div>
     </>}
   </div>;
 }

@@ -81,19 +81,42 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
   return <div className="page-header"><div><div className="eyebrow">Street Smart Cockpit</div><div className="page-title">{title}</div><div className="page-subtitle">{subtitle}</div></div>{action}</div>;
 }
 
-export function Composer({ value, setValue, onSend, compact = false }: {
+export function Composer({ value, setValue, onSend, compact = false, mentionOptions, mentionValue, onMention }: {
   value: string; setValue: (v: string) => void; onSend: () => void; compact?: boolean;
+  /** @mention ala Joule: opsi assistant (sudah difilter role oleh parent). */
+  mentionOptions?: { id: string; name: string; tagline?: string }[];
+  mentionValue?: string;
+  onMention?: (id: string) => void;
 }) {
   const submit = (e: FormEvent) => { e.preventDefault(); onSend(); };
+  const canMention = Boolean(mentionOptions?.length && onMention);
+  const mentionName = mentionOptions?.find((o) => o.id === mentionValue)?.name;
+  const mq = canMention ? (value.match(/@(\w*)$/)?.[1] ?? null) : null;
+  const hits = mq === null ? [] : mentionOptions!.filter((o) => o.name.toLowerCase().includes(mq.toLowerCase()) || o.id.includes(mq.toLowerCase()));
+  const pick = (id: string) => { setValue(value.replace(/@\w*$/, '')); onMention!(id); };
   return <form className={`composer ${compact ? 'composer-compact' : ''}`} onSubmit={submit}>
-    <Textarea value={value} onChange={(e) => setValue(e.target.value)} placeholder="Ask Street Smart anything about your business..."
+    {mq !== null && hits.length > 0 && <div className="mention-pop">
+      {hits.map((o) => <button type="button" key={o.id} onClick={() => pick(o.id)}><strong>@{o.name}</strong><small>{o.tagline ?? o.id}</small></button>)}
+    </div>}
+    <Textarea value={value} onChange={(e) => setValue(e.target.value)} placeholder="Ask Street Smart anything about your business... (type @ for assistants)"
       rows={compact ? 1 : 2}
-      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); } }} />
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          const m = value.match(/@(\w*)$/);
+          if (m && canMention && hits.length === 1) {
+            pick(hits[0].id);
+            return;
+          }
+          onSend();
+        }
+      }} />
     <div className="composer-toolbar">
       <div className="composer-tools">
         <Button icon="paperclip" variant="icon" title="Attach a document" onClick={() => setValue(`${value}${value ? ' ' : ''}[Document attached]`)} />
         <Button icon="mic" variant="icon" title="Voice input" onClick={() => setValue('Show me the highest priority tender opportunities')} />
         <Select aria-label="Business context"><option>All business data</option><option>Tenders</option><option>Distributor sales</option><option>Product catalogue</option><option>Documents</option></Select>
+        {mentionName && mentionValue !== 'auto' && <button type="button" className="mention-chip" title="Mentioned assistant — click to clear" onClick={() => onMention!('auto')}>@{mentionName} ✕</button>}
       </div>
       <Button icon="send" variant="primary" type="submit">Send</Button>
     </div>

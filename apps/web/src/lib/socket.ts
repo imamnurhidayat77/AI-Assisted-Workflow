@@ -20,6 +20,22 @@ export function getSessionId(): string {
   return sessionId;
 }
 
+function storedKey(): string {
+  try {
+    return window.localStorage.getItem('street-smart-api-key') ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** (Re-)autentikasi socket agar menerima event draft milik sendiri ( + semua bila management).
+ * Aman dipanggil kapan pun — tanpa key valid server menjawab auth:error dan tak ada event push. */
+export function reauthSocket(): void {
+  try {
+    if (socket?.connected) socket.emit('auth', { apiKey: storedKey() });
+  } catch { /* abaikan — REST tetap sumber kebenaran */ }
+}
+
 /** Lazy singleton socket. Resolves null when the realtime endpoint is unreachable. */
 export function getSocket(timeoutMs = 2500): Promise<Socket | null> {
   if (socket?.connected) return Promise.resolve(socket);
@@ -27,7 +43,15 @@ export function getSocket(timeoutMs = 2500): Promise<Socket | null> {
     try {
       const s = io(URL, { transports: ['websocket', 'polling'], timeout: timeoutMs });
       const timer = setTimeout(() => { s.close(); resolve(null); }, timeoutMs);
-      s.on('connect', () => { clearTimeout(timer); socket = s; resolve(s); });
+      s.on('connect', () => {
+        clearTimeout(timer);
+        socket = s;
+        // Langsung auth agar event draft:changed terscope ke user ini.
+        try {
+          s.emit('auth', { apiKey: storedKey() });
+        } catch { /* abaikan */ }
+        resolve(s);
+      });
       s.on('connect_error', () => { clearTimeout(timer); s.close(); resolve(null); });
     } catch {
       resolve(null);

@@ -1,29 +1,29 @@
 # System Design — Street Smart Cockpit
 
 **Companion to:** `01-requirements-brief.md`
-**Status:** Living document — v1.0 (reflects implementation as built)
+**Status:** Living document — v1.1 (drafts lifecycle, Spaces decisions, LLM extraction opt-in)
 
 ---
 
 ## 1. Architecture Overview
 
-Monorepo (npm workspaces), TypeScript throughout, **mock-first with graceful
-fallback at every layer**: UI → API → DB each degrades instead of failing.
+Monorepo (npm workspaces), TypeScript throughout, **live-DB only — tanpa fallback mock**:
+UI → API → Neon Postgres; DB mati = 503 eksplisit + empty state jujur (tanpa data palsu).
 
 ```mermaid
 flowchart LR
     subgraph WEB["apps/web — Next.js 15"]
-        UI[11 App Router pages] --> Store[Toast + API client]
-        Store -->|fetch + local fallback| API
+        UI[App Router pages] --> Store[Toast + API client]
+        Store -->|fetch, gagal = error/empty| API
     end
     subgraph SRV["apps/api — Express 4"]
-        API[/api/* routers/] --> SVC[services: llm, tenders, documents]
-        SVC -->|Prisma| DB[(Postgres 16)]
-        SVC -.->|DB down| MEM[(in-memory seed)]
+        API[/api/* routers/] --> SVC[services: llm, tenders, documents, ...]
+        SVC -->|Prisma| DB[(Neon Postgres)]
+        SVC -.->|DB down| ERR[503 eksplisit]
         SVC -.->|AI_PROVIDER=http| LLM[(LLM API)]
     end
     subgraph SHARED["packages/shared"]
-        T[types + mock data + mockChatAnswer]
+        T[types + fixtures seed/test + mockChatAnswer (test/legacy saja)]
     end
     WEB --> SHARED
     SRV --> SHARED
@@ -38,7 +38,7 @@ apps/api/prisma schema.prisma + seed.ts
 apps/api/uploads stored user files (gitignored)
 packages/shared types + mock data + mock answer branches
 docs/           this folder (deliverables)
-docker-compose.yml Postgres 16 on host port 5433
+neon.ts + .neon  Postgres Neon (org Imam, project Smart City Street, branch production)
 figma-make/     original Figma Make reference (do not edit)
 ```
 
@@ -46,22 +46,24 @@ figma-make/     original Figma Make reference (do not edit)
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | Mock-first, fall back — never hard-require DB/LLM | Demo/evaluation must run on any laptop with zero keys |
+| D1 | Live-DB only — tanpa fallback mock (dulu: mock-first) | DB Neon mati = 503 + empty state jujur; eval/dev butuh `DATABASE_URL` Neon |
 | D2 | Single shared mock dataset (`packages/shared`) | Web + API stay consistent; doubles as evaluation ground truth |
 | D3 | Provider abstraction for AI (`AI_PROVIDER=mock\|http`) | Swap to real key (e.g. muse-spark) via env only, no code change |
 | D4 | Grounding by construction, not by prompt alone | Tender cards/IDs resolved + validated against live DB rows |
 | D5 | Provenance headers (`X-AI-Via`, `X-Data-Via`) | Makes accuracy/time-saved evaluation measurable |
-| D6 | Postgres on 5433 | Host port 5432 already occupied; avoids conflicts |
+| D6 | Postgres Neon (managed, Sydney) | Tanpa docker lokal; `DATABASE_URL` via `neon env pull`, migrate via direct URL |
 | D7 | Design system referencing style.ai.id | Dark-first tokens, Plus Jakarta Sans / Nunito / JetBrains Mono, glassy cards |
 
 ## 2. Frontend (`apps/web`)
 
 - **Framework:** Next.js 15 App Router, React 19, Tailwind v4 (`@tailwindcss/postcss`).
 - **Routing:** 11 routes — `/` Discover, `/conversation` (detail; `?q=` prefill, `?new=1` blank),
-  `/conversations`, `/spaces`, `/jobs`, `/documents`, `/data`, `/connections`,
-  `/reports`, `/status`, `/alerts`. Sidebar has no separate "New conversation" entry;
+  `/conversations`, `/spaces`, `/jobs`, `/documents`, `/data`,
+  `/reports`. Sidebar has no separate "New conversation" entry;
+  halaman connections/status/alerts dihapus (mock tanpa API); jobs khusus
+  operations+management, reports khusus sales+operations+management;
   `/conversation` highlights **Conversations** (it is a detail view).
-- **State:** `lib/store.tsx` (toast), `lib/api.ts` (`get`/`post` with fallback values).
+- **State:** `lib/store.tsx` (toast), `lib/api.ts` (`get`/`post` — gagal = fallback yang diberikan caller; halaman data kini memakai `null` + empty/error state, bukan data palsu).
 - **Styling:** single `globals.css` design system — CSS variables, `[data-theme]` dark/light,
   theme toggle persisted in `localStorage`, no-JS theme init in `layout.tsx`.
 - **Build:** all pages prerendered static; `transpilePackages: ['@street-smart/shared']`.
@@ -73,30 +75,66 @@ figma-make/     original Figma Make reference (do not edit)
 | `GET /health` | liveness (`mode: mock`) |
 | `POST /api/chat` | `chatWithAI()` → routing assistant per-role (`assistantId`/`role`, auto-infer bila absen) → headers `X-AI-Via`, `X-Data-Via`, `X-Assistant` |
 | `GET /api/chat/assistants[?role=]` | daftar assistant + skills (registry ala Joule Studio) |
-| `GET /api/tenders[?q=]` / `GET /api/tenders/:id` | DB-first + keyword filter, header `X-Data-Via` |
-| `GET /api/documents` | list (DB or memory) |
-| `POST /api/documents/upload` | multer, 50 MB, allowlist `.pdf .xlsx .xls .csv .docx`; status `Processing` → `Processed` after ~8 s |
-| `GET /api/documents/:id/extract` | deterministic structured extraction (tender / sales / quotation / general) |
-| `DELETE /api/documents/:id` | metadata + file removal |
-| `GET /api/conversations|jobs|alerts|reports/summary` | mock stubs (Prisma-ready) |
+| `GET /api/tenders[?q=]` / `GET /api/tenders/:id` | DB langsung + keyword filter, header `X-Data-Via`; mati = 503 |
+| `GET /api/documents` | list terfilter domain per-role (DB saja; mati = 503) |
+| `POST /api/documents/upload` | multer, 50 MB, allowlist `.pdf .xlsx .xls .csv .docx`; field `domain` (general\|finance\|hr, hanya role sepadan+mgmt); status `Processing` → `Processed` after ~8 s |
+| `GET /api/documents/:id/extract` | structured extraction w/ per-field confidence+source+missingFields; LLM path when `EXTRACT_PROVIDER=http`; tanpa teks terparse = 422 jujur; 404 bila domain di luar role |
+| `DELETE /api/documents/:id` | metadata + file removal (ikut domain scoping) |
+| `POST /api/chat/query` | Text-to-SQL read-only: `{question}` (mock rule engine / LLM `proposeSql`) atau `{sql}` langsung; validator allowlist ketat (tabel/kolom/WHERE/ORDER/LIMIT≤50 per-role, tolak `;--/* */UNION/JOIN/DDL`); BigInt→Number; audit `text-to-sql` |
+| `GET /api/audit[?take=]` | riwayat chat (preview 200 char), khusus management |
+| `GET /api/conversations|reports/summary` | mock stubs (Prisma-ready); `/api/alerts` dihapus |
+| `GET /api/jobs` | static automations + live draft-approval queue on top (antrean ikut kepemilikan) |
+| `GET /api/drafts[?status=]` | list milik sendiri incl. history, management = semua (Prisma saja, DB mati = 503) |
+| `POST /api/drafts` / `PATCH /api/drafts/:id` | requireAuth; create catat `createdBy`, edit ikut kepemilikan (409 bila final) |
+| `POST /api/drafts/:id/submit\|approve\|reject\|reopen` | consequential transitions, `requireAuth` + ownership, `decidedBy` from session; emits `draft:changed` ke pemilik + management saja |
 
-### 3.1 AI service (`services/llm.ts`)
+### 3.1 AI service (`services/llm.ts`, `realtime.ts`)
 
 ```
-message → getTenders(message) [live rows + via]
-        → provider==http ? chatWithHttp (system prompt injected with ≤20 live rows,
-                           response IDs validated against live set)
-                         : chatWithMock (cards = live rows matching mock IDs,
-                           else top-3 filtered rows) + 600 ms simulated latency
-        → on HTTP failure: warn + mock fallback
+message → getTenders(message) [live rows + via] ──▶ stage: tenders
+        → retrieveChunks (+ recent top-up) ────────▶ stage: docs
+        → provider==http ? chatWithHttp ───────────▶ stage: ai
+                         : mock + 600ms ──────────▶ stage: done
 ```
 
-### 3.2 Document service (`services/documents.ts`)
+- Realtime: Socket.IO on the same port (`chat:message` in, `chat:stage` progress,
+  `chat:answer` / `chat:error` out). The frontend tries socket first (70s cap)
+  and falls back to `POST /api/chat`; the thinking card animates per stage.
+- Per-client `sessionId` (stored in localStorage) is forwarded as
+  `x-opencode-session` for gateway routing + prompt caching.
 
-`DocumentStore`: tries Prisma (`DATABASE_URL`), else in-memory seeded with the same
-3 samples. Same interface either way, so routes are storage-agnostic.
+### 3.2 Document service (`services/documents.ts`, `services/extract.ts`)
 
-### 3.3 RAG pipeline (`services/ingest.ts`, `embeddings.ts`, `retrieval.ts`)
+`DocumentStore`: Prisma saja — DB mati = 503, tanpa memori palsu.
+
+Extraction (`GET /api/documents/:id/extract`) returns `DocumentExtraction`
+(`kind`, avg `confidence`, `fields[]` w/ per-field confidence+source+needsReview,
+`missingFields[]`):
+- `EXTRACT_PROVIDER=http` (+ `LLM_*` set) and parsed text available → `extractWithLLM()`
+  (Responses API, truncated context, strict JSON contract, server-side validate/clamp).
+- RAG parsed text tersedia → ringkasan ekstraksi asli (character/chunk count + preview).
+- Tanpa teks terparse → 422 jujur (`still processing` / `re-upload`), bukan angka simulasi.
+  (`extractDocument()` deterministik kini hanya baseline eval `score-extraction.ts`.)
+
+### 3.3 Drafts service (`services/drafts.ts`, `routes/drafts.ts`, `routes/jobs.ts`)
+
+State machine (pure helpers `canMoveDraftStatus`/`canEditDraftStatus` in shared, unit-tested):
+
+```
+draft ─┬─▶ in_review ─┬─▶ approved   (locked: no edits, no transitions)
+       │              ├─▶ rejected ─▶ draft (reopen & fix)
+       ├─▶ approved
+       └─▶ rejected
+```
+
+- Storage: Prisma `Draft` table saja (tanpa memori fallback); DB mati = 503.
+- `decidedBy/decidedAt` + append-only `history[]`; `sourceDocumentId/Name` links document-reviewed drafts.
+- Every mutation emits Socket.IO `draft:changed {id, status}` (no body) HANYA ke room pemilik
+  (`user:<id>`) + `role:management` — socket wajib `auth` dulu; anonim/role lain tidak menerima apa pun.
+  `/jobs` reloads on event, REST stays source of truth.
+- `/jobs` = static automations + `draftToJob()` rows for `draft`/`in_review` (approved never queues → no double action).
+
+### 3.4 RAG pipeline (`services/ingest.ts`, `embeddings.ts`, `retrieval.ts`)
 
 ```
 upload → parse teks asli (pdf-parse / sheetjs / mammoth, max 200rb char)
@@ -135,14 +173,25 @@ erDiagram
     MESSAGE { string id PK, string role, string content }
     DOCUMENT { string id PK, string fileName, string sizeLabel, string status }
     JOB { string id PK, string name, string agent, string state }
+    DRAFT {
+        string id PK
+        string kind
+        string status "draft|in_review|approved|rejected"
+        string decidedBy
+        Json history
+        string sourceDocumentId
+    }
+    APPUSER { string id PK, string name, string role, string apiKeyHash }
+    CHATAUDIT { string id PK, string messagePreview }
 ```
 
 - `TenderStatus`: `IDENTIFIED | PENDING | SUBMITTED | WON | LOST` → display labels mapped in `services/tenders.ts`.
 - Finance: `Invoice` (AR/AP, agregat — tanpa bank detail) + `CloseCheckItem` (per periode, owner = tim).
 - HR: `HrPolicy` + `LeaveRow` (agregat tim — tanpa nama/gaji individu, by design).
-- Seed: 6 tenders, 5 jobs, 3 documents, 5 invoices, 5 checklist items, 3 policies, 3 roster rows (idempoten via `upsert`/cek `fileName`).
-- Assistant registry (`packages/shared`): 5 assistants × 13 skills; `services/finance.ts` + `services/hr.ts` DB-first + mock fallback (pola sama seperti `tenders.ts`).
-- Migrations: `prisma migrate dev`; client generated via `prisma:generate`.
+- Seed: 6 tenders, 5 jobs, 3 documents, 5 invoices, 5 checklist items, 3 policies, 3 roster rows (idempoten via `upsert`/cek `fileName`) + demo users (`AppUser`).
+- Spaces surfaces approved drafts (`GET /api/drafts?status=approved`) as saved workspace decisions with source-document + decider links.
+- Assistant registry (`packages/shared`): assistants × skills; semua grounding service DB-only (tanpa fallback mock — kosong = jawaban "belum ada data" yang eksplisit).
+- Migrations: `prisma migrate dev` (atau `deploy`); client generated via `prisma:generate`. DB = Neon `production` (lihat AGENTS.md).
 
 ## 5. AI Grounding & Anti-Hallucination
 
@@ -154,12 +203,36 @@ erDiagram
 
 - Secrets only via env (`.env`, gitignored); `.env.example` documents every variable.
 - Upload allowlist + size cap; filenames sanitised; uploads dir gitignored.
-- No auth (single demo user) — flagged in requirements §7; add before any real deployment.
-- Local run: `docker compose up -d db` → migrate → seed → `npm run dev:web`, `npm run dev:api`.
+- Auth minimal aktif: API key per user (`AppUser`, hash SHA-256 saja yang disimpan),
+  RBAC `ASSISTANT_ROLES` di `packages/shared` (server enforcement di REST + Socket.IO,
+  web hanya UI gating), keputusan consequential drafts (`submit/approve/reject/reopen`)
+  wajib auth + ownership + `decidedBy` dari sesi, audit chat (`ChatAudit`, preview 200 char — bukan isi penuh,
+  baca via `GET /api/audit` khusus management + halaman `/audits`).
+  Demo-login (`ALLOW_DEMO_LOGIN=true`) hanya untuk lokal; matikan + SSO/OAuth sebelum production.
+- Semua `/api/*` (kecuali `/health`, `/api/auth/users`, demo-login) wajib auth. Dokumen ter-scope
+  domain (`general|finance|hr`); draft list milik sendiri. Tender/jobs/reports: semua role aktif boleh baca
+  (halaman jobs/reports dibatasi nav + guard: jobs = operations/management,
+  reports = sales/operations/management; data explorer menyembunyikan browser
+  tender untuk finance/hr).
+- Tes: `packages/shared` (vitest: RBAC, scoping, builder agregat), `apps/api` (node:test: draft machine,
+  ekstraksi, validator SQL, parse thread, embedding fallback, rate limit); `eval/run.ts` 6 cek integrasi (grounding, RAG, cleanup).
+- Riwayat chat tersimpan per user (`Conversation.createdBy/assistantId` + `Message`; `POST /api/chat`
+  menerima `conversationId`, mengembalikan id baru bila perlu; thread dibaca owner/management;
+  halaman `/conversation?c=` merender thread + lanjutkan, `/conversations` daftar milik sendiri).
+- Embedding pluggable: `EMBEDDING_PROVIDER=hash|neural|http` (default hash, 384d ternormalisasi).
+  Neural/http gagal → warn sekali + fallback hash; ganti provider WAJIB `POST /api/documents/reindex`
+  (operations/management). darwin/x64 tidak punya binding onnx — neural aktif di Linux/prod.
+- Hardening: rate limit per-user (chat/query/login, 429 + Retry-After; in-memory → Redis bila multi-instance),
+  key TTL (`AppUser.apiKeyExpiresAt`, demo-login/rotate beri TTL; seed NULL), rotate via
+  `POST /api/auth/rotate`, CORS allowlist (`CORS_ORIGINS`), backup via `npm run db:backup` (`scripts/db-backup.sh`).
+- Migrasi sehat kembali: histori drift `rag_chunks` diperbaiki via backup → `migrate reset` → restore data
+  (backup di `/tmp/full-backup.sql`); `migrate dev` normal lagi ("Already in sync").
+- Local run: `neon env pull` → migrate → seed → `npm run dev:web`, `npm run dev:api` (tanpa docker).
 
 ## 7. Known Limitations → Roadmap
 
-1. Extraction = parse teks + chunking (belum OCR/LLM field extraction) → skor terhadap ground-truth set.
-2. Embedding = hashing deterministik → ganti model neural saat mesin/kuota memungkinkan; retrieval keyword tender tetap ada, Text-to-SQL menyusul.
-3. Add auth, roles, audit log before production.
-4. Add `03-test-evaluation-plan.md` with accuracy/usability/time-saved protocol (next deliverable).
+1. Extraction = parse teks + chunking; LLM field extraction opt-in via `EXTRACT_PROVIDER=http`
+   (biaya/kuota model). True OCR for scanned PDFs still missing → skor E2 terhadap ground-truth set.
+2. Embedding = hashing deterministik → ganti model neural saat mesin/kuota memungkinkan; retrieval keyword tender tetap ada, Text-to-SQL distributor sales sudah live (`DistributorSale`, rule engine + `proposeSql`, GROUP BY belum didukung validator).
+3. Auth = demo-login + API key + RBAC assistant scope + draft/chat audit; SSO/OAuth + per-row permissions before production.
+4. Draft transitions covered by unit tests (`npm run test --workspace=apps/api`); E4/E5 usability sessions per `03-test-evaluation-plan.md`.

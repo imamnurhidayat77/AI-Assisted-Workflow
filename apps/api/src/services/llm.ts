@@ -3,19 +3,26 @@ import {
   financeAnswer,
   formatMoney,
   hrAnswer,
-  mockChatAnswer,
+  opsAnswer,
   resolveAssistant,
+  salesAnswer,
   type ChatResponse,
   type CloseCheckItem,
+  type DistributorSale,
+  type DocStats,
   type HrPolicy,
   type Invoice,
+  type JobItem,
   type LeaveRow,
   type RoleId,
   type Tender,
 } from '@street-smart/shared';
 import { getTenders } from './tenders.js';
-import { getFinanceSnapshot } from './finance.js';
+import { getFinanceSnapshot, type FinanceSnapshot } from './finance.js';
+import { getSalesSnapshot } from './sales.js';
 import { getHrSnapshot } from './hr.js';
+import { getOpsSnapshot } from './ops.js';
+import { isSqlIntent, mockAnswerSql } from './sql.js';
 import { isDocIntent, recentChunks, retrieveChunks, type ChunkHit } from './retrieval.js';
 
 export interface DomainSnapshots {
@@ -23,8 +30,13 @@ export interface DomainSnapshots {
   checklist: CloseCheckItem[];
   policies: HrPolicy[];
   roster: LeaveRow[];
+  jobs: JobItem[];
+  docs: DocStats;
+  sales: DistributorSale[];
   financeVia: 'db' | 'mock';
   hrVia: 'db' | 'mock';
+  opsVia: 'db' | 'mock';
+  salesVia: 'db' | 'mock';
 }
 
 export interface ChatOpts {
@@ -65,25 +77,50 @@ export async function chatWithAI(message: string, opts: ChatOpts = {}): Promise<
   const needsTenders = assistant.dataScopes.includes('tenders');
   const needsFinance = assistant.dataScopes.includes('invoices_ar_ap');
   const needsHr = assistant.dataScopes.includes('hr_policies');
+  const needsOps = assistant.dataScopes.includes('jobs');
+  const needsSales = assistant.dataScopes.includes('distributor_sales');
   const { rows: liveTenders, via: tenderVia } = needsTenders
     ? await getTenders(message)
     : { rows: [], via: 'mock' as const };
-  const [finance, hr] = await Promise.all([
+  const [finance, hr, ops, sales] = await Promise.all([
     needsFinance ? getFinanceSnapshot() : Promise.resolve(null),
     needsHr ? getHrSnapshot() : Promise.resolve(null),
+    needsOps ? getOpsSnapshot() : Promise.resolve(null),
+    needsSales ? getSalesSnapshot() : Promise.resolve(null),
   ]);
   const snap: DomainSnapshots = {
     invoices: finance?.invoices ?? [],
     checklist: finance?.checklist ?? [],
     policies: hr?.policies ?? [],
     roster: hr?.roster ?? [],
+    jobs: ops?.jobs ?? [],
+    docs: ops?.docs ?? { total: 0, byStatus: {}, processing: [] },
+    sales: sales?.rows ?? [],
     financeVia: finance?.via ?? 'mock',
     hrVia: hr?.via ?? 'mock',
+    opsVia: ops?.via ?? 'mock',
+    salesVia: sales?.via ?? 'mock',
   };
-  const dataVia = needsTenders ? tenderVia : needsFinance ? snap.financeVia : needsHr ? snap.hrVia : ('mock' as const);
+  const dataVia = needsTenders ? tenderVia : needsFinance ? snap.financeVia : needsHr ? snap.hrVia : needsOps ? snap.opsVia : needsSales ? snap.salesVia : ('mock' as const);
   opts.onStage?.('tenders');
   // Most relevant document chunks (empty when no chunks / DB down).
   let chunks = await retrieveChunks(message);
+  // Template learning: brief/draft/RFP intent → contoh struktur dari dokumen
+  // lampau ikut diambil agar jawaban meniru bentuknya (diisi data live).
+  const briefIntent = /(brief|draft|\bRFP\b|template|proposal|quotation|tender response|approval summary)/i.test(message);
+  let templateFiles: string[] = [];
+  if (briefIntent) {
+    const extra = await retrieveChunks(`${message} template structure sections headings`, 3);
+    const seen = new Set(chunks.map((h) => `${h.documentId}#${h.chunkIndex}`));
+    for (const h of extra) {
+      const k = `${h.documentId}#${h.chunkIndex}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        chunks.push(h);
+      }
+    }
+    templateFiles = [...new Set(chunks.map((h) => h.fileName))].slice(0, 3);
+  }
   // Document intent ("the document I just uploaded"): top up with newest chunks
   // so general document questions still get answered despite low word overlap.
   const docIntent = isDocIntent(message);
@@ -100,7 +137,7 @@ export async function chatWithAI(message: string, opts: ChatOpts = {}): Promise<
   if (provider !== 'mock') {
     opts.onStage?.('ai');
     try {
-      const res = await chatWithHttp(message, liveTenders, chunks, assistant.id, assistant.systemPrompt, snap, opts.sessionId);
+      const res = await chatWithHttp(message, liveTenders, chunks, assistant.id, assistant.systemPrompt, snap, opts.sessionId, templateFiles);
       opts.onStage?.('done');
       return { ...res, dataVia };
     } catch (err) {
@@ -109,7 +146,7 @@ export async function chatWithAI(message: string, opts: ChatOpts = {}): Promise<
   }
   await new Promise((r) => setTimeout(r, SIMULATED_LATENCY_MS));
   opts.onStage?.('done');
-  return { ...chatWithMock(message, liveTenders, chunks, assistant.id, snap), dataVia };
+  return { ...chatWithMock(message, liveTenders, chunks, assistant.id, snap, opts.role, templateFiles), dataVia };
 }
 
 /** Document-intent answer — never falls back to generic tender cards. English only. */
@@ -141,21 +178,120 @@ function docAnswer(message: string, chunks: ChunkHit[]): Omit<LlmChatResult, 'da
   };
 }
 
+/** Explicit empty-state: DB hidup tapi tabel domain kosong. Jujur, tanpa angka karangan. */
+function noDataAnswer(assistantId: string, copy: string, liveTenders: Tender[]): Omit<LlmChatResult, 'dataVia'> {
+  return {
+    answerTitle: 'No data yet',
+    answerCopy: copy,
+    tenderIds: [],
+    recommendation: 'Add the source records first, then ask again.',
+    sources: [],
+    followUps: ['What data is available?', 'Show the database explorer'],
+    assistantId,
+    skillsUsed: [],
+    tenders: [],
+    via: 'mock',
+  };
+}
+
+/** Prioritas tender dihitung murni dari baris live: hitung per status + 3 teratas (urutan DB). */
+function tenderPriorityAnswer(liveTenders: Tender[], assistantId: string): ChatResponse {
+  const byStatus: Record<string, number> = {};
+  for (const t of liveTenders) byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
+  const top = liveTenders.slice(0, 3);
+  return {
+    answerTitle: top.length ? 'Priorities from the live pipeline' : 'No tenders in the pipeline',
+    answerCopy: top.length
+      ? `${liveTenders.length} tenders tracked (${Object.entries(byStatus)
+        .map(([s, n]) => `${n} ${s}`)
+        .join(' · ')}).\n\n` +
+        top.map((t, i) => `${i + 1}. ${t.id} — ${t.name} (${t.agency}, closes ${t.date}, ${t.value})`).join('\n')
+      : 'The tender pipeline is empty.',
+    tenderIds: top.map((t) => t.id),
+    recommendation: top.length
+      ? `Start with ${top[0].id} and work down the list; check compliance docs for each.`
+      : 'Add tenders first, then ask for priorities.',
+    sources: top.map((t) => ({ label: `Tender Pipeline / ${t.id}`, detail: 'Live database row' })),
+    followUps: ['Show deadlines on a timeline', 'Which tenders close soonest?', 'Compare the technical requirements'],
+    assistantId,
+    skillsUsed: ['tender-search'],
+  };
+}
+
 function chatWithMock(
   message: string,
   liveTenders: Tender[],
   chunks: ChunkHit[],
   assistantId: string,
   snap: DomainSnapshots,
+  role?: RoleId,
+  templateFiles: string[] = [],
 ): Omit<LlmChatResult, 'dataVia'> {
   if (isDocIntent(message)) return { ...docAnswer(message, chunks), assistantId, skillsUsed: ['doc-extract-status'] };
-  // Finance/HR answers are computed from live snapshots (DB or mock fallback) — never hardcoded.
-  const answer =
-    assistantId === 'finance-assistant' && snap.invoices.length
-      ? financeAnswer(snap.invoices, snap.checklist, snap.financeVia === 'db' ? 'live' : 'simulated')
-      : assistantId === 'hr-assistant' && snap.policies.length
-        ? hrAnswer(snap.policies, snap.roster, snap.hrVia === 'db' ? 'live' : 'simulated')
-        : mockChatAnswer(message, assistantId);
+  // Ad-hoc data questions: rule-engine SQL dulu (hanya bila role diketahui agar
+  // scoping tabel berlaku); tidak cocok → jatuh ke jawaban builder biasa.
+  if (role && isSqlIntent(message)) {
+    const hit = mockAnswerSql(message, role, {
+      tenders: liveTenders.map((t) => ({ id: t.id, status: t.status })),
+      invoices: snap.invoices,
+      checklist: snap.checklist,
+      policies: snap.policies,
+      roster: snap.roster,
+      jobs: snap.jobs,
+      docs: snap.docs,
+      sales: snap.sales,
+    });
+    if (hit) return {
+      answerTitle: `Query result — ${hit.rowCount} row${hit.rowCount === 1 ? '' : 's'}`,
+      answerCopy: `Ran read-only query over live data:\n${hit.sql}\n` +
+        hit.rows.slice(0, 3).map((r) => JSON.stringify(r)).join('\n') +
+        (hit.rowCount > 3 ? `\n…+${hit.rowCount - 3} more (open Database explorer for the full table)` : ''),
+      tenderIds: [],
+      recommendation: 'Refine with the Text-to-SQL box in Database explorer for full tables and filters.',
+      sources: [{ label: 'Text-to-SQL', detail: hit.sql }],
+      followUps: ['Show the full table', 'Filter by status', 'Ask another data question'],
+      assistantId,
+      skillsUsed: ['text-to-sql'],
+      tenders: [],
+      via: 'mock',
+    };
+  }
+  // Semua jawaban dihitung dari snapshot live DB — tidak ada narasi canned / data hardcode.
+  // Snapshot kosong untuk domain assistant → jawaban "belum ada data" yang eksplisit.
+  const isSalesQuestion = /(sales|distributor|revenue|units|quarter|q[234]|compare|growth|sku)/i.test(message);
+  if (assistantId === 'finance-assistant' && !snap.invoices.length) {
+    return noDataAnswer(assistantId, 'No invoices in the database yet. Import AR/AP invoices first, then ask again.', liveTenders);
+  }
+  if (assistantId === 'hr-assistant' && !snap.policies.length) {
+    return noDataAnswer(assistantId, 'No HR policies in the database yet. Add policy records first, then ask again.', liveTenders);
+  }
+  if (assistantId === 'ops-assistant' && !snap.jobs.length && !snap.docs.total) {
+    return noDataAnswer(assistantId, 'No jobs or documents in the database yet.', liveTenders);
+  }
+  if ((assistantId === 'sales-assistant' || assistantId === 'management-assistant') && isSalesQuestion && !/tender|quot/i.test(message) && !snap.sales.length) {
+    return noDataAnswer(assistantId, 'No distributor sales rows in the database yet.', liveTenders);
+  }
+  if (!liveTenders.length && (assistantId === 'sales-assistant' || assistantId === 'management-assistant') && !isSalesQuestion) {
+    return noDataAnswer(assistantId, 'No tenders in the pipeline yet. Add tenders first, then ask for priorities.', liveTenders);
+  }
+  let answer =
+    (assistantId === 'sales-assistant' || assistantId === 'management-assistant') && snap.sales.length && isSalesQuestion && !/tender|quot/i.test(message)
+      ? salesAnswer(snap.sales, 'live')
+      : assistantId === 'finance-assistant'
+      ? financeAnswer(snap.invoices, snap.checklist, 'live')
+      : assistantId === 'hr-assistant'
+        ? hrAnswer(snap.policies, snap.roster, 'live')
+        : assistantId === 'ops-assistant'
+          ? opsAnswer(snap.jobs, snap.docs, 'live')
+          : tenderPriorityAnswer(liveTenders, assistantId);
+  // Template learning (mock): sebutkan dokumen lampau yang strukturnya ditiru —
+  // fakta tetap dari live data, tidak menyalin angka dokumen lama.
+  if (templateFiles.length) {
+    answer = {
+      ...answer,
+      recommendation: `${answer.recommendation} Structured after ${templateFiles.join(', ')} (past uploads — facts still from live data).`,
+    };
+  }
   // Kartu tender hanya untuk assistant yang scope-nya mencakup tenders (sales/management/ops);
   // finance/hr tetap tanpa kartu agar tidak membingungkan. ID selalu dari live rows.
   const wantsCards = answer.tenderIds.length > 0 && liveTenders.length > 0;
@@ -191,6 +327,7 @@ async function chatWithHttp(
   systemPrompt: string,
   snap: DomainSnapshots,
   sessionId?: string,
+  templateFiles: string[] = [],
 ): Promise<Omit<LlmChatResult, 'dataVia'>> {
   const base = process.env.LLM_BASE_URL?.replace(/\/$/, '');
   const key = process.env.LLM_API_KEY;
@@ -214,17 +351,30 @@ async function chatWithHttp(
         ...snap.policies.map((p) => `- ${p.title}: ${p.summary}`),
         'Roster: ' + snap.roster.map((r) => `${r.team} ${r.onLeave}/${r.headcount} on leave (${r.weekLabel})`).join(' | ')]
       : []),
+    ...((snap.jobs.length || snap.docs.total)
+      ? ['', 'OPS SNAPSHOT (live jobs + document ingestion, report from these rows):',
+        ...snap.jobs.slice(0, 15).map((j) => `- ${j.name} | ${j.agent} | ${j.state} | trigger ${j.trigger} | last ${j.lastRun}`),
+        `Documents: ${snap.docs.total} total (${Object.entries(snap.docs.byStatus).map(([s, n]) => `${n} ${s}`).join(', ')})`]
+      : []),
+    ...(snap.sales.length
+      ? ['', 'SALES SNAPSHOT (live distributor rows, compute aggregates from these — never invent numbers):',
+        ...snap.sales.map((r) => `- ${r.id}: ${r.distributor} | ${r.country} | ${r.product} ${r.sku} | ${r.quarter} | ${r.units} units | ${formatMoney(r.amountCents, r.currency)}`)]
+      : []),
     ...(chunks.length
       ? ['', 'DOCUMENT CONTEXT (cite using the exact labels as written):',
         ...chunks.map((h, i) => `[${i + 1}] ${h.fileName} part #${h.chunkIndex + 1}: ${h.content.slice(0, 600)}`)]
       : []),
     ...(isDocIntent(message)
-      ? ['', 'This question is about DOCUMENTS, not tenders: answer from the DOCUMENT CONTEXT above. If the context is empty or irrelevant, honestly say which documents are available and ask the user to upload one first. Never answer with a generic tender list.']
+      ? ['', 'This question is about DOCUMENTS, not tenders: answer from the DOCUMENT CONTEXT above. If the context is empty or irrelevant, honestly say which documents are available and upload one first. Never answer with a generic tender list.']
+      : []),
+    ...(templateFiles.length
+      ? ['', `TEMPLATE GUIDANCE: the user wants a brief/draft/RFP. Past uploads (${templateFiles.join(', ')}) contain brief structures — mirror their section headings and table layouts in your answer. Fill every fact ONLY from the LIVE data above, never copy numbers from the old documents. Name the mirrored file(s) in sources.`]
       : []),
     '',
     'OUTPUT CONTRACT: your entire response is exactly one valid JSON object and nothing else — no intro, no explanation, no code fences:',
     '{"answerTitle":string,"answerCopy":string,"tenderIds":string[],"recommendation":string,',
     '"sources":[{"label":string,"detail":string}],"followUps":string[],"skillsUsed":string[]}',
+    'Readability: answerCopy must be scannable — key figures first, one item per line starting with "• ", blank line between sections. Never one long paragraph.',
     'Language: English.',
     '',
     `User: ${message.slice(0, 4000)}`,
@@ -245,7 +395,10 @@ async function chatWithHttp(
       body: JSON.stringify({ model, input, reasoning: { effort: 'low' }, max_output_tokens: 2000 }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const text = extractOutputText(await res.json());
+    const body = (await res.json()) as { status?: string };
+    const text = extractOutputText(body);
+    // Respons incomplete (budget habis di reasoning) → fallback mock, jangan crash parse.
+    if (!text.trim()) throw new Error(`LLM returned no text (status: ${body.status ?? 'unknown'})`);
     const parsed = JSON.parse(stripFences(text)) as ChatResponse;
     // Validate IDs against live data — foreign IDs are dropped to prevent hallucination.
     const validIds = new Set(liveTenders.map((t) => t.id));

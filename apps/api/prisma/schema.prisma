@@ -31,11 +31,16 @@ model Tender {
 }
 
 model Conversation {
-  id        String   @id @default(cuid())
-  title     String
-  preview   String?
-  createdAt DateTime @default(now())
-  messages  Message[]
+  id          String   @id @default(cuid())
+  title       String
+  preview     String?
+  createdBy   String? // AppUser.id pemilik — list milik sendiri (management: semua)
+  assistantId String? // assistant terakhir yang dipakai di thread ini
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  messages    Message[]
+
+  @@index([createdBy, updatedAt])
 }
 
 model Message {
@@ -52,6 +57,7 @@ model Document {
   fileName  String
   sizeLabel String?
   status    String   @default("Processing") // Processing | Processed | Completed
+  domain    String   @default("general") // general | finance | hr — scoping baca per-role
   extractedText String? @db.Text // teks asli hasil parse (RAG)
   createdAt DateTime @default(now())
   chunks    DocumentChunk[]
@@ -80,6 +86,32 @@ model Job {
   progress String?
 }
 
+/// Persistent workspace (Joule-style Space): groups saved conversations,
+/// documents, tenders and notes around a business goal.
+model Space {
+  id          String      @id @default(cuid())
+  name        String
+  description String      @default("")
+  tone        String      @default("blue") // amber | blue | green | purple
+  icon        String      @default("grid")
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  items       SpaceItem[]
+}
+
+model SpaceItem {
+  id        String   @id @default(cuid())
+  spaceId   String
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  kind      String   // conversation | document | tender | note
+  refId     String   @default("")
+  title     String
+  preview   String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([spaceId])
+}
+
 // Keputusan manusia atas draft AI — audit permanen (AI drafter, human decider).
 model Draft {
   id               String    @id @default(cuid())
@@ -93,11 +125,15 @@ model Draft {
   tenderIds        Json      @default("[]")
   sourceDocumentId String?
   sourceDocumentName String?
+  sourceQuotationId String? // tautan balik draft → quotation (aliran approval otomatis)
   decidedBy        String?
   decidedAt        DateTime?
   history          Json      @default("[]")
+  createdBy        String? // AppUser.id pembuat — list difilter per user (mgmt: semua)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+
+  @@index([createdBy])
 }
 
 enum InvoiceDirection {
@@ -135,6 +171,49 @@ model CloseCheckItem {
   updatedAt DateTime @updatedAt
 }
 
+// Distributor sales (aggregate, no customer PII): basis Text-to-SQL sales.
+model DistributorSale {
+  id          String   @id // DS-NZ-001
+  distributor String
+  country     String // New Zealand | Australia | ...
+  product     String // Smartstud | Smartped | Tunnel markers | ...
+  sku         String
+  quarter     String // 2026-Q2
+  units       Int
+  amountCents Int
+  currency    String   @default("NZD")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([country, quarter])
+}
+
+// Auth minimal: API-key per user (hash only) + audit chat (preview, bukan isi penuh).
+model AppUser {
+  id              String    @id // u-sales, u-finance, ...
+  name            String
+  role            String // RoleId: sales | finance | hr | operations | management
+  apiKeyHash      String    @unique
+  active          Boolean   @default(true)
+  apiKeyExpiresAt DateTime? // null = tanpa expiry (seed awal); demo-login beri TTL
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  audits          ChatAudit[]
+}
+
+model ChatAudit {
+  id            String   @id @default(cuid())
+  userId        String
+  user          AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role          String
+  assistantId   String
+  messagePreview String  @db.VarChar(200)
+  via           String   @default("mock")
+  createdAt     DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
 // HR: policies + aggregate roster only. No individual names/salaries by design.
 model HrPolicy {
   id        String   @id // HR-POL-LEAVE
@@ -154,3 +233,26 @@ model LeaveRow {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// Quotations: penawaran ke customer, tertaut ke tender bila ada.
+// Status hidup di sini (draft → sent → approved / rejected / expired);
+// keputusan consequential tetap lewat Draft kind=quotation-review (maker-checker).
+model Quotation {
+  id          String    @id @default(cuid())
+  number      String    @unique // Q-1043 — nomor urut bisnis, diisi saat create
+  title       String
+  partner     String    // customer
+  tenderId    String?   // tautan ke Tender.id bila terkait tender
+  amountCents Int
+  currency    String    @default("NZD")
+  status      String    @default("draft") // draft | sent | approved | rejected | expired
+  validUntil  DateTime?
+  createdBy   String?   // AppUser.id pembuat — list milik sendiri (mgmt: semua)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([createdBy])
+  @@index([tenderId])
+}
+
+

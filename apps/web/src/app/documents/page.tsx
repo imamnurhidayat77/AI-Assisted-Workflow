@@ -3,17 +3,17 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Shell } from '@/components/layout/Shell';
 import { Button, Icon, Input, PageHeader, Status } from '@/components/ui/primitives';
-import { api } from '@/lib/api';
+import { api, getStoredKey } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { useToast } from '@/lib/store';
-import { draftKindForExtraction, extractionNeedsReview, type DocumentExtraction, type Draft } from '@street-smart/shared';
+
+function authHeaders(): Record<string, string> {
+  const key = getStoredKey();
+  return key ? { 'X-API-Key': key } : {};
+}
+import { canUploadDomain, draftKindForExtraction, extractionNeedsReview, renderDraftBody, type DocumentExtraction, type Draft } from '@street-smart/shared';
 
 interface DocItem { id: string; fileName: string; sizeLabel: string; status: string; createdAt: string; }
-
-const FALLBACK_DOCS: DocItem[] = [
-  { id: 'seed-1', fileName: 'NZTA_Tender_2026.pdf', sizeLabel: '4.8 MB', status: 'Processed', createdAt: new Date().toISOString() },
-  { id: 'seed-2', fileName: 'Distributor_Sales_Q3.xlsx', sizeLabel: '2.1 MB', status: 'Processing', createdAt: new Date().toISOString() },
-  { id: 'seed-3', fileName: 'Smartstud_Quotation_1042.pdf', sizeLabel: '860 KB', status: 'Completed', createdAt: new Date().toISOString() },
-];
 
 function sourceTone(s: string): 'green' | 'amber' | 'gray' {
   if (s === 'extracted') return 'green';
@@ -23,8 +23,18 @@ function sourceTone(s: string): 'green' | 'amber' | 'gray' {
 
 export default function DocumentsPage() {
   const { toast } = useToast();
-  const [docs, setDocs] = useState<DocItem[]>(FALLBACK_DOCS);
+  const { user } = useAuth();
+  // Tanpa data palsu: mulai kosong, isi dari DB; gagal load → error eksplisit.
+  const [docs, setDocs] = useState<DocItem[]>([]);
+  const [loadError, setLoadError] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadDomain, setUploadDomain] = useState<'general' | 'finance' | 'hr'>('general');
+  // Opsi domain upload dibatasi role (server tetap enforcement final via 403).
+  const domainOptions = (['general', 'finance', 'hr'] as const).filter((d) => canUploadDomain(user?.role, d));
+  useEffect(() => {
+    if (!domainOptions.includes(uploadDomain)) setUploadDomain('general');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role]);
   const [selected, setSelected] = useState<DocItem | null>(null);
   const [extraction, setExtraction] = useState<DocumentExtraction | null>(null);
   const [edited, setEdited] = useState<Record<string, string>>({});
@@ -32,9 +42,18 @@ export default function DocumentsPage() {
   const [createdDraft, setCreatedDraft] = useState<Draft | null>(null);
 
   const load = useCallback(async () => {
-    const rows = await api.get<DocItem[]>('/api/documents', FALLBACK_DOCS);
-    setDocs(rows);
-    return rows;
+    try {
+      const res = await fetch(`${api.base}/api/documents`, { headers: authHeaders(), cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const rows = (await res.json()) as DocItem[];
+      setDocs(rows);
+      setLoadError(false);
+      return rows;
+    } catch {
+      // DB/API mati: tampilkan kosong + error, JANGAN data simulasi.
+      setLoadError(true);
+      return [] as DocItem[];
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -52,19 +71,15 @@ export default function DocumentsPage() {
     try {
       const form = new FormData();
       Array.from(list).forEach((f) => form.append('files', f));
-      const res = await fetch(`${api.base}/api/documents/upload`, { method: 'POST', body: form });
+      form.append('domain', uploadDomain);
+      const res = await fetch(`${api.base}/api/documents/upload`, { method: 'POST', headers: authHeaders(), body: form });
       if (!res.ok) throw new Error(await res.text());
       const created = (await res.json()) as DocItem[];
       toast(`${created.length} dokumen masuk antrean — ekstraksi berjalan`);
       await load();
     } catch {
-      // Fallback lokal bila API mati: tampilkan sebagai Processing
-      setDocs((cur) => [...cur, ...Array.from(list).map((f, i) => ({
-        id: `local-${Date.now()}-${i}`, fileName: f.name,
-        sizeLabel: f.size > 1048576 ? `${(f.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(f.size / 1024))} KB`,
-        status: 'Processing', createdAt: new Date().toISOString(),
-      }))]);
-      toast('API tidak terjangkau — ditampilkan lokal (simulasi)');
+      // Upload gagal (API/DB mati): JANGAN tampilkan baris palsu — error eksplisit.
+      toast('Upload gagal — API/database tidak terjangkau. Periksa koneksi lalu coba lagi.');
     } finally {
       setUploading(false);
     }
@@ -75,37 +90,46 @@ export default function DocumentsPage() {
     setEdited({});
     setCreatedDraft(null);
     try {
-      const res = await fetch(`${api.base}/api/documents/${doc.id}/extract`);
+      const res = await fetch(`${api.base}/api/documents/${doc.id}/extract`, { headers: authHeaders() });
       if (!res.ok) throw new Error('nf');
       const json = await res.json();
       setExtraction(json.extraction as DocumentExtraction);
     } catch {
       setExtraction(null);
-      toast(`Preview ekstraksi ${doc.fileName} (simulasi)`);
+      // 422 (belum ada teks terparse) maupun API mati: katakan terus terang.
+      toast(`Ekstraksi ${doc.fileName} belum tersedia — tunggu status Processed atau upload ulang`);
     }
   };
 
   const removeDoc = async (doc: DocItem) => {
     try {
-      await fetch(`${api.base}/api/documents/${doc.id}`, { method: 'DELETE' });
+      const res = await fetch(`${api.base}/api/documents/${doc.id}`, { method: 'DELETE', headers: authHeaders() });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       if (selected?.id === doc.id) { setSelected(null); setExtraction(null); setEdited({}); setCreatedDraft(null); }
       await load();
       toast(`${doc.fileName} deleted`);
     } catch {
-      setDocs((cur) => cur.filter((d) => d.id !== doc.id));
+      toast(`Gagal menghapus ${doc.fileName} — API/database tidak terjangkau`);
     }
   };
 
-  // Manusia perbaiki nilai field, lalu jadikan draft — keputusan final tetap di flow approve.
+  // Manusia perbaiki nilai field, lalu jadikan draft — template baku per kind,
+  // keputusan final tetap di flow approve.
   const makeDraft = async () => {
     if (!selected || !extraction) return;
     setCreating(true);
-    const lines = extraction.fields.map((f) => `- ${f.label}: ${edited[f.label] ?? f.value}`);
-    if (extraction.missingFields.length) lines.push(`\nStill incomplete: ${extraction.missingFields.join(', ')} — needs human completion.`);
+    const kind = draftKindForExtraction(extraction.kind);
+    const facts = extraction.fields.map((f) => `${f.label}: ${edited[f.label] ?? f.value}`);
+    if (extraction.missingFields.length) facts.push(`Missing — needs human completion: ${extraction.missingFields.join(', ')}`);
     const payload = {
-      kind: draftKindForExtraction(extraction.kind),
+      kind,
       title: `${extraction.kind}: ${selected.fileName}`,
-      body: [`Hasil review ${selected.fileName} (${extraction.kind}):`, ...lines].join('\n'),
+      body: renderDraftBody(kind, {
+        summary: `Extraction review of ${selected.fileName} (${extraction.kind}, confidence ${Math.round(extraction.confidence * 100)}%).`,
+        facts,
+        sources: [{ label: selected.fileName, detail: extraction.kind }],
+        assistantName: 'Document Intelligence',
+      }),
       skillsUsed: ['doc-extract-status'],
       sources: [{ label: selected.fileName, detail: extraction.kind }],
       sourceDocumentId: selected.id,
@@ -130,14 +154,21 @@ export default function DocumentsPage() {
       <div className="document-layout">
         <div className="table-card upload-card">
           <label className="drop-zone" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); uploadFiles(e.dataTransfer.files); }}>
-            <input type="file" multiple accept=".pdf,.xlsx,.xls,.csv,.docx" onChange={(e) => uploadFiles(e.target.files)} />
+            <input type="file" multiple accept=".pdf,.xlsx,.xls,.csv,.docx,.png,.jpg,.jpeg,.tif,.tiff,.bmp" onChange={(e) => uploadFiles(e.target.files)} />
             <div className="upload-symbol"><Icon name="upload" size={26} /></div>
             <div className="drop-title">{uploading ? 'Uploading…' : 'Drop business documents here'}</div>
-            <div className="drop-copy">Tender PDFs, sales spreadsheets, quotations, and other records</div>
+            <div className="drop-copy">Tender PDFs, sales spreadsheets, quotations, scanned photos (OCR), and other records</div>
             <span className="btn btn-primary">Browse files</span>
-            <div className="drop-meta">PDF, XLSX, XLS, CSV, DOCX · Maximum 50 MB</div>
+            <div className="drop-meta">PDF, XLSX, XLS, CSV, DOCX, PNG, JPG, TIF, BMP · Maximum 50 MB</div>
+            <div className="drop-meta">Visibility:&nbsp;
+              <select aria-label="Document domain" value={uploadDomain} onChange={(e) => setUploadDomain(e.target.value as 'general' | 'finance' | 'hr')} onClick={(e) => e.stopPropagation()} style={{ marginTop: 6 }}>
+                {domainOptions.includes('general') && <option value="general">General — all roles</option>}
+                {domainOptions.includes('finance') && <option value="finance">Finance — finance + management</option>}
+                {domainOptions.includes('hr') && <option value="hr">HR — hr + management</option>}
+              </select>
+            </div>
           </label>
-          <div className="queue-header"><div><div className="table-title">Processing queue</div><div className="table-subtitle">{docs.length} files · stored in database</div></div></div>
+          <div className="queue-header"><div><div className="table-title">Processing queue</div><div className="table-subtitle">{loadError ? 'Database tidak terjangkau — tidak ada data palsu yang ditampilkan' : `${docs.length} files · stored in database`}</div></div></div>
           <div className="file-list">{docs.map((d) => <div className="file-row" key={d.id}>
             <div className="file-icon"><Icon name="file" /></div>
             <div className="file-main"><div className="file-name">{d.fileName}</div><div className="file-meta">{d.sizeLabel} · {new Date(d.createdAt).toLocaleDateString()}</div>{d.status === 'Processing' && <div className="file-progress"><i /></div>}</div>

@@ -1,1 +1,15 @@
-{"0": "api/package.json", "1": "Shell", "2": "ingest.ts", "3": "llm.ts", "4": "web/package.json", "5": "shared/src/index.ts", "6": "compilerOptions", "7": "scripts", "8": "services/drafts.ts", "9": "compilerOptions", "10": "conversation/page.tsx", "11": "db", "12": "api/src/index.ts", "13": "seed.ts", "14": "shared/package.json", "15": "layout.tsx", "16": "next-env.d.ts", "17": "postcss.config.mjs"}
+{
+  "0": "api/package.json",
+  "1": "Shell",
+  "2": "ingest.ts",
+  "4": "web/package.json",
+  "5": "shared/src/index.ts",
+  "6": "compilerOptions",
+  "7": "scripts",
+  "9": "compilerOptions",
+  "11": "db",
+  "12": "api/src/index.ts",
+  "14": "shared/package.json",
+  "16": "next-env.d.ts",
+  "17": "postcss.config.mjs"
+}

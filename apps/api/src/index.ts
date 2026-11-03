@@ -6,59 +6,79 @@ dotenv.config({ path: new URL('../.env', import.meta.url) });
 import { createServer } from 'node:http';
 import express from 'express';
 import cors from 'cors';
-import { alerts, conversationHistory, mockChatAnswer, tenders } from '@street-smart/shared';
+import authRouter from './routes/auth.js';
+import { requireAuth } from './services/auth.js';
+import { embeddingInfo } from './services/embeddings.js';
+import auditRouter from './routes/audit.js';
 import chatRouter from './routes/chat.js';
+import conversationsRouter from './routes/conversations.js';
 import tendersRouter from './routes/tenders.js';
 import documentsRouter from './routes/documents.js';
 import draftsRouter from './routes/drafts.js';
+import spacesRouter from './routes/spaces.js';
 import jobsRouter from './routes/jobs.js';
+import quotationsRouter from './routes/quotations.js';
+import distributorRouter from './routes/distributor.js';
+import financeRouter from './routes/finance.js';
+import hrRouter from './routes/hr.js';
+import notificationsRouter from './routes/notifications.js';
 import { initRealtime } from './realtime.js';
+import { startScheduler } from './services/scheduler.js';
 
 const app = express();
-app.use(cors({ origin: process.env.WEB_URL ?? 'http://localhost:3000' }));
+// CORS ketat: daftar origin eksplisit via CORS_ORIGINS (koma) atau WEB_URL tunggal.
+// Tanpa credentials (auth pakai header X-API-Key, bukan cookie).
+const allowedOrigins = (process.env.CORS_ORIGINS ?? process.env.WEB_URL ?? 'http://localhost:3000')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'street-smart-api', mode: 'mock', time: new Date().toISOString() });
+  // embeddingInfo sync (tanpa load model) — aman dipanggil tiap health check.
+  res.json({ ok: true, service: 'street-smart-api', mode: 'mock', time: new Date().toISOString(), embedding: embeddingInfo() });
 });
 
 // Mount modular routers (mock-first, Prisma-ready)
+app.use('/api/auth', authRouter);
+app.use('/api/audit', auditRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api/conversations', conversationsRouter);
 app.use('/api/tenders', tendersRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/drafts', draftsRouter);
+app.use('/api/spaces', spacesRouter);
 app.use('/api/jobs', jobsRouter);
+app.use('/api/quotations', quotationsRouter);
+app.use('/api/distributor', distributorRouter);
+app.use('/api/finance', financeRouter);
+app.use('/api/hr', hrRouter);
+app.use('/api/notifications', notificationsRouter);
 
-// Simple inline stubs — dipindah ke routes/ saat berkembang
-app.get('/api/conversations', (_req, res) => res.json(conversationHistory));
-app.get('/api/alerts', (_req, res) => res.json(alerts));
-app.get('/api/reports/summary', (_req, res) => {
-  res.json({
-    kpis: [
-      { value: '1,248', label: 'Total tenders', change: '+8.4% YoY' },
-      { value: 'NZD 8.42M', label: 'Active pipeline', change: '+12.1%' },
-      { value: '34.8%', label: 'Success rate', change: '+3.2 pts' },
-      { value: '42', label: 'Closing this month', change: '8 high priority' },
-    ],
-    monthly: [420, 580, 490, 760, 640, 920, 710, 1040],
-    byCountry: [
-      { name: 'New Zealand', share: 42 },
-      { name: 'Australia', share: 27 },
-      { name: 'Asia Pacific', share: 18 },
-      { name: 'Europe', share: 13 },
-    ],
-  });
-});
+// Stub operasional yang tersisa sudah dihapus (alerts, reports/summary) agar tidak
+// menyajikan angka palsu — tidak ada pemakai. Kembalikan sebagai route DB-backed
+// bila tabel sumbernya ada. Reports dihitung live dari /api/tenders di halaman reports.
 
-// Fallback chat lama (tetap didukung FE lama)
-app.post('/api/chat-legacy', (req, res) => {
-  const message = String(req.body?.message ?? '');
-  const answer = mockChatAnswer(message);
-  const matched = tenders.filter((t) => answer.tenderIds.includes(t.id));
-  res.json({ ...answer, tenders: matched });
+// Fallback chat lama (tetap didukung FE lama) — ikut wajib auth, lewat orchestrator
+// yang sama dengan /api/chat (data live, tanpa narasi canned).
+app.post('/api/chat-legacy', requireAuth, async (req, res) => {
+  try {
+    const { chatWithAI } = await import('./services/llm.js');
+    const user = (res as unknown as { locals: { user: { id: string; role: 'sales' | 'finance' | 'hr' | 'operations' | 'management' } } }).locals.user;
+    const message = String(req.body?.message ?? '');
+    if (!message.trim()) return res.status(400).json({ error: 'message is required' });
+    const result = await chatWithAI(message, { role: user.role });
+    res.json(result);
+  } catch (e) {
+    const status = typeof (e as { status?: unknown })?.status === 'number' ? ((e as { status: number }).status as number) : 500;
+    res.status(status).json({ error: e instanceof Error ? e.message : 'chat unavailable' });
+  }
 });
 
 const port = Number(process.env.API_PORT ?? 4000);
 const httpServer = createServer(app);
 initRealtime(httpServer, process.env.WEB_URL ?? 'http://localhost:3000');
+// Sweep eskalasi SLA tiap jam (idempoten; butuh DATABASE_URL, diam bila mati).
+startScheduler();
 httpServer.listen(port, () => console.log(`[api] listening on :${port} (http + socket.io)`));

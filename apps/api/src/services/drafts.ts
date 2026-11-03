@@ -22,8 +22,10 @@ type Row = {
   tenderIds: unknown;
   sourceDocumentId: string | null;
   sourceDocumentName: string | null;
+  sourceQuotationId: string | null;
   decidedBy: string | null;
   decidedAt: Date | null;
+  createdBy: string | null;
   history: unknown;
   createdAt: Date;
   updatedAt: Date;
@@ -54,51 +56,62 @@ function toDraft(r: Row): Draft {
     sources: asSources(r.sources),
     tenderIds: asStrings(r.tenderIds),
     sourceDocumentId: r.sourceDocumentId ?? undefined,
+    sourceQuotationId: r.sourceQuotationId ?? undefined,
     sourceDocumentName: r.sourceDocumentName ?? undefined,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
     decidedBy: r.decidedBy ?? undefined,
     decidedAt: r.decidedAt ? r.decidedAt.toISOString() : undefined,
+    createdBy: r.createdBy ?? undefined,
     history: Array.isArray(r.history) ? (r.history as DraftHistoryEntry[]) : [],
   };
 }
 
+function dbError(e: unknown): never {
+  if (e && typeof (e as { status?: unknown }).status === 'number') throw e;
+  throw Object.assign(new Error('database unreachable'), { status: 503 });
+}
+
 class DraftStore {
   private prisma: PrismaClient | null = null;
-  private memory = new Map<string, Draft>();
 
-  private async db(): Promise<PrismaClient | null> {
+  private async db(): Promise<PrismaClient> {
     if (this.prisma) return this.prisma;
-    if (!process.env.DATABASE_URL) return null;
+    if (!process.env.DATABASE_URL) throw Object.assign(new Error('database unreachable'), { status: 503 });
     try {
       const client = new PrismaClient();
       await client.$queryRaw`SELECT 1`;
       this.prisma = client;
       return client;
-    } catch {
-      return null;
+    } catch (e) {
+      dbError(e);
     }
   }
 
-  async list(): Promise<Draft[]> {
-    const db = await this.db();
-    if (!db) return [...this.memory.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-    const rows = await db.draft.findMany({ orderBy: { createdAt: 'desc' } });
-    return rows.map(toDraft);
+  /** List draft milik user (management: semua). DB mati → 503, tanpa data palsu. */
+  async list(viewer?: { id: string; role: string }): Promise<Draft[]> {
+    const db = await this.db().catch(dbError);
+    const all = (await db.draft.findMany({ orderBy: { createdAt: 'desc' } }).catch(dbError)).map(toDraft);
+    if (viewer && viewer.role !== 'management') {
+      // Draft lama tanpa createdBy tetap terlihat agar tidak hilang mendadak;
+      // shortcut: backfill createdBy saat migrasi data berikutnya.
+      return all.filter((d) => !d.createdBy || d.createdBy === viewer.id);
+    }
+    return all;
   }
 
   async get(id: string): Promise<Draft | null> {
-    const db = await this.db();
-    if (!db) return this.memory.get(id) ?? null;
-    const row = await db.draft.findUnique({ where: { id } });
+    const db = await this.db().catch(dbError);
+    const row = await db.draft.findUnique({ where: { id } }).catch(dbError);
     return row ? toDraft(row) : null;
   }
 
-  async create(input: CreateDraftInput): Promise<Draft> {
+  async create(input: CreateDraftInput & { createdBy?: unknown }): Promise<Draft> {
     const title = String(input.title ?? '').trim().slice(0, 200);
     const body = String(input.body ?? '').slice(0, 20000);
     if (!title) throw Object.assign(new Error('title is required'), { status: 400 });
     if (!body.trim()) throw Object.assign(new Error('body is required'), { status: 400 });
+    const createdBy = typeof input.createdBy === 'string' && input.createdBy ? input.createdBy.slice(0, 64) : undefined;
     const kind: DraftKind = isDraftKind(input.kind) ? input.kind : 'general';
     const now = new Date().toISOString();
     const base: Draft = {
@@ -124,26 +137,27 @@ class DraftStore {
         typeof input.sourceDocumentId === 'string' ? input.sourceDocumentId.slice(0, 64) : undefined,
       sourceDocumentName:
         typeof input.sourceDocumentName === 'string' ? input.sourceDocumentName.slice(0, 200) : undefined,
+      sourceQuotationId:
+        typeof input.sourceQuotationId === 'string' ? input.sourceQuotationId.slice(0, 64) : undefined,
       createdAt: now,
       updatedAt: now,
+      createdBy,
       history: [{ at: now, actor: 'ai', action: 'created' }],
     };
-    const db = await this.db();
-    if (!db) {
-      this.memory.set(base.id, base);
-      return base;
-    }
+    const db = await this.db().catch(dbError);
     const row = await db.draft.create({
       data: {
         kind: base.kind,
         title: base.title,
         body: base.body,
         status: 'draft',
+        createdBy: base.createdBy ?? null,
         assistantId: base.assistantId,
         skillsUsed: base.skillsUsed ?? [],
         sources: base.sources ?? [],
         tenderIds: base.tenderIds ?? [],
         sourceDocumentId: base.sourceDocumentId,
+        sourceQuotationId: base.sourceQuotationId ?? null,
         sourceDocumentName: base.sourceDocumentName,
         history: asJson(base.history),
       },
@@ -152,8 +166,8 @@ class DraftStore {
   }
 
   async edit(id: string, patch: { title?: unknown; body?: unknown }): Promise<Draft> {
-    const db = await this.db();
-    const cur = db ? await this.get(id) : this.memory.get(id) ?? null;
+    const db = await this.db().catch(dbError);
+    const cur = await this.get(id);
     if (!cur) throw Object.assign(new Error('not found'), { status: 404 });
     // Keputusan final tidak bisa diubah diam-diam — tolak edit setelah approved/rejected.
     if (!canEditDraftStatus(cur.status)) {
@@ -163,10 +177,6 @@ class DraftStore {
     if (typeof patch.body === 'string' && patch.body.trim()) cur.body = patch.body.slice(0, 20000);
     cur.updatedAt = new Date().toISOString();
     cur.history = [...cur.history, { at: cur.updatedAt, actor: 'human', action: 'edited' } as DraftHistoryEntry];
-    if (!db) {
-      this.memory.set(id, cur);
-      return cur;
-    }
     const row = await db.draft.update({
       where: { id },
       data: { title: cur.title, body: cur.body, history: asJson(cur.history) },
@@ -175,8 +185,8 @@ class DraftStore {
   }
 
   async setStatus(id: string, to: Draft['status'], decidedBy?: unknown): Promise<Draft> {
-    const db = await this.db();
-    const cur = db ? await this.get(id) : this.memory.get(id) ?? null;
+    const db = await this.db().catch(dbError);
+    const cur = await this.get(id);
     if (!cur) throw Object.assign(new Error('not found'), { status: 404 });
     if (!canMoveDraftStatus(cur.status, to)) {
       throw Object.assign(new Error(`cannot move ${cur.status} → ${to}`), { status: 409 });
@@ -192,10 +202,6 @@ class DraftStore {
     const action = to === 'approved' ? 'approved' : to === 'rejected' ? 'rejected' : 'submitted';
     cur.updatedAt = new Date().toISOString();
     cur.history = [...cur.history, { at: cur.updatedAt, actor: 'human', action } as DraftHistoryEntry];
-    if (!db) {
-      this.memory.set(id, cur);
-      return cur;
-    }
     const row = await db.draft.update({
       where: { id },
       data: {
@@ -221,11 +227,14 @@ export interface CreateDraftInput {
   tenderIds?: unknown;
   sourceDocumentId?: unknown;
   sourceDocumentName?: unknown;
+  sourceQuotationId?: unknown;
 }
 
-export const listDrafts = () => store.list();
+export const listDrafts = (viewer?: { id: string; role: string }) => store.list(viewer);
+/** Semua draft tanpa filter owner — untuk inbox/notifikasi (filter checker di route). */
+export const listAllDrafts = () => store.list();
 export const getDraft = (id: string) => store.get(id);
-export const createDraft = (input: CreateDraftInput) => store.create(input);
+export const createDraft = (input: CreateDraftInput & { createdBy?: unknown }) => store.create(input);
 export const editDraft = (id: string, patch: { title?: unknown; body?: unknown }) => store.edit(id, patch);
 export const setDraftStatus = (id: string, to: Draft['status'], decidedBy?: unknown) =>
   store.setStatus(id, to, decidedBy);

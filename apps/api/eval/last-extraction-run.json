@@ -1,0 +1,149 @@
+{
+  "date": "2026-11-01T18:40:21.051Z",
+  "pass": true,
+  "fieldRate": 1,
+  "kindRate": 1,
+  "docs": 20,
+  "perDoc": [
+    {
+      "file": "Tender_TND-FX-001.pdf",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Tender_TND-FX-002.pdf",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Tender_TND-FX-003.pdf",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Tender_TND-FX-004.pdf",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Tender_TND-FX-005.pdf",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Tender_TND-FX-006.pdf",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Distributor_Sales_NZ_Q3.xlsx",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Distributor_Sales_NZ_Q3.csv",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Distributor_Sales_AU_Q3.xlsx",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Distributor_Sales_AU_Q3.csv",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Distributor_Sales_Pacific_Q3.xlsx",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Distributor_Sales_Pacific_Q3.csv",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Quotation_Q-2001.pdf",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Quotation_Q-2002.pdf",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Quotation_Q-2003.pdf",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Quotation_Q-2004.docx",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Quotation_Q-2005.docx",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Team_Memo_Oct.pdf",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Leave_Policy_2026.docx",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    },
+    {
+      "file": "Site_Notes.csv",
+      "pass": true,
+      "missing": [],
+      "kindMatch": true,
+      "chunks": 1
+    }
+  ]
+}

@@ -1,0 +1,289 @@
+{
+  "date": "2026-11-01T20:25:23.380Z",
+  "mode": "live",
+  "accuracy": 0.05,
+  "passed": 2,
+  "total": 40,
+  "rows": [
+    {
+      "file": "Tender_TND-FX-001.pdf",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Tender_TND-FX-002.pdf",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Tender_TND-FX-003.pdf",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Tender_TND-FX-004.pdf",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Tender_TND-FX-005.pdf",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Tender_TND-FX-006.pdf",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Distributor_Sales_NZ_Q3.xlsx",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Distributor_Sales_NZ_Q3.csv",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Distributor_Sales_AU_Q3.xlsx",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Distributor_Sales_AU_Q3.csv",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Distributor_Sales_Pacific_Q3.xlsx",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Distributor_Sales_Pacific_Q3.csv",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Quotation_Q-2001.pdf",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Quotation_Q-2002.pdf",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Quotation_Q-2003.pdf",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Quotation_Q-2004.docx",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Quotation_Q-2005.docx",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Team_Memo_Oct.pdf",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Leave_Policy_2026.docx",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Site_Notes.csv",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "tender_auckland_2026.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "tender_wellington_tunnel.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "tender_christchurch_ped.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "nzta_brisbane_crossing.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "tender_oslo_visibility.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "tender_singapore_guidance.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "sales_q3_2026.csv",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "sales_nz_au.csv",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "sales_distributor_q3.csv",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "sales_pacific.xlsx",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "sales_annual.xlsx",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "Smartstud_Quotation_1042.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "quotation_wellington_2071.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "quotation_brisbane_3090.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "quotation_oslo_4110.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "quotation_spot_5001.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "meeting_notes_oct.txt",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "misc_log.csv",
+      "kind": "?",
+      "recall": 0,
+      "pass": false,
+      "note": "llm unavailable"
+    },
+    {
+      "file": "ocr_quotation_1042.png",
+      "kind": "ocr",
+      "recall": 1,
+      "pass": true,
+      "note": "hit 3/3"
+    },
+    {
+      "file": "ocr_tender_notice.png",
+      "kind": "ocr",
+      "recall": 1,
+      "pass": true,
+      "note": "hit 3/3"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { tenders as mockTenders, type Tender } from '@street-smart/shared';
+import type { Tender } from '@street-smart/shared';
 
 const STATUS_LABEL: Record<string, Tender['status']> = {
   IDENTIFIED: 'Identified',
@@ -24,10 +24,11 @@ async function db(): Promise<PrismaClient | null> {
   }
 }
 
-/** Ambil tender dari Postgres; fallback ke data simulasi bila DB tidak reachable. */
-export async function getTenders(query?: string): Promise<{ rows: Tender[]; via: 'db' | 'mock' }> {
+/** Ambil tender dari Postgres. Tanpa fallback mock: DB mati → 503 eksplisit.
+ * Tabel kosong = kondisi legit (bukan error) — caller menampilkan empty state. */
+export async function getTenders(query?: string): Promise<{ rows: Tender[]; via: 'db' }> {
   const prisma = await db();
-  if (!prisma) return { rows: filterMock(query), via: 'mock' };
+  if (!prisma) throw Object.assign(new Error('database unreachable'), { status: 503 });
   try {
     const found = await prisma.tender.findMany({ orderBy: { createdAt: 'asc' } });
     const rows: Tender[] = found.map((t) => ({
@@ -42,8 +43,9 @@ export async function getTenders(query?: string): Promise<{ rows: Tender[]; via:
       priority: (t.priority as Tender['priority']) ?? undefined,
     }));
     return { rows: filterRows(rows, query), via: 'db' };
-  } catch {
-    return { rows: filterMock(query), via: 'mock' };
+  } catch (e) {
+    if (e && typeof (e as { status?: unknown }).status === 'number') throw e;
+    throw Object.assign(new Error('database query failed'), { status: 503 });
   }
 }
 
@@ -60,8 +62,4 @@ function filterRows(rows: Tender[], query?: string): Tender[] {
     ),
   );
   return hit.length ? hit : rows;
-}
-
-function filterMock(query?: string): Tender[] {
-  return filterRows(mockTenders, query);
 }
